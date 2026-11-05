@@ -12,9 +12,9 @@
 // calculated from the filtered current and voltage values.
 //
 // Single phase: current_l1 + voltage_l1, three phase: current_l1..l3 + voltage_l1..l3.
-// With a relay switch configured the currents are measured only while it is on, otherwise
-// they are 0 (like esp32-evse, which measured only while charging), so the noise of the
-// current sensors is not counted.
+// With a monitored relay the currents are measured only while it is on, otherwise they are
+// 0 (like esp32-evse, which measured only while charging), so the noise of the current
+// inputs is not counted. Without it, the noise can be removed with sensor filters.
 
 #include <cstdint>
 
@@ -48,7 +48,7 @@ class EvseEnergyMeter : public PollingComponent {
   void set_total_power_sensor(sensor::Sensor *sensor) { this->total_power_sensor_ = sensor; }
   void set_total_energy_sensor(sensor::Sensor *sensor) { this->total_energy_sensor_ = sensor; }
 #ifdef USE_SWITCH
-  void set_relay(switch_::Switch *relay) { this->relay_ = relay; }
+  void set_monitored_relay(switch_::Switch *relay) { this->monitored_relay_ = relay; }
 #endif
   void set_sample_duration(uint32_t sample_duration_ms) { this->sample_duration_us_ = sample_duration_ms * 1000; }
 
@@ -84,7 +84,7 @@ class EvseEnergyMeter : public PollingComponent {
   sensor::Sensor *total_power_sensor_{nullptr};
   sensor::Sensor *total_energy_sensor_{nullptr};
 #ifdef USE_SWITCH
-  switch_::Switch *relay_{nullptr};
+  switch_::Switch *monitored_relay_{nullptr};
 #endif
   uint32_t sample_duration_us_{40000};
 

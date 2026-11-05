@@ -8,7 +8,7 @@
 //  * pilot: ledc output (1kHz PWM / +-12V) + adc sensor via VoltageSampler
 //  * AC relay: an ESPHome switch
 //  * RCM: sense pin (rising edge interrupt) + test pin
-//  * LEDs: ESPHome lights
+//  * LEDs: lights of the evse light platform (pin, no output needed)
 //  * authorization: binary sensor or switch
 //  * temperature: ESPHome sensors
 //  * energy: current / voltage sensors of any energy meter
@@ -27,6 +27,7 @@
 #include "esphome/components/switch/switch.h"
 #include "esphome/components/voltage_sampler/voltage_sampler.h"
 #ifdef USE_LIGHT
+#include "esphome/components/light/light_output.h"
 #include "esphome/components/light/light_state.h"
 #endif
 #ifdef USE_BINARY_SENSOR
@@ -150,6 +151,30 @@ class Rcm {
 };
 
 #ifdef USE_LIGHT
+/// Output of the evse light platform: a binary light directly on a GPIO pin
+class EvseLightOutput : public light::LightOutput, public Component {
+ public:
+  void set_pin(GPIOPin *pin) { this->pin_ = pin; }
+  void setup() override {
+    this->pin_->setup();
+    this->pin_->digital_write(false);
+  }
+  float get_setup_priority() const override { return setup_priority::HARDWARE; }
+  light::LightTraits get_traits() override {
+    auto traits = light::LightTraits();
+    traits.set_supported_color_modes({light::ColorMode::ON_OFF});
+    return traits;
+  }
+  void write_state(light::LightState *state) override {
+    bool binary;
+    state->current_values_as_binary(&binary);
+    this->pin_->digital_write(binary);
+  }
+
+ protected:
+  GPIOPin *pin_{nullptr};
+};
+
 /// Drives a light with a blink pattern, like led.c of esp32-evse
 class EvseLed {
  public:
@@ -197,9 +222,9 @@ class Evse : public PollingComponent, public EvseHal {
     this->rcm_test_pin_ = test_pin;
   }
 #ifdef USE_LIGHT
+  // called by the evse light platform
   void set_charging_led(light::LightState *light) { this->charging_led_.set_light(light); }
   void set_error_led(light::LightState *light) { this->error_led_.set_light(light); }
-  void set_wifi_led(light::LightState *light) { this->wifi_led_.set_light(light); }
 #endif
 #ifdef USE_BINARY_SENSOR
   void set_authorization_binary_sensor(binary_sensor::BinarySensor *sensor) { this->auth_binary_sensor_ = sensor; }
@@ -284,7 +309,6 @@ class Evse : public PollingComponent, public EvseHal {
   void publish_state_();
   void publish_session_();
   void update_leds_();
-  void update_wifi_led_();
   void write_relay_(bool state);
 #ifdef USE_NUMBER
   void publish_number_(EvseNumberType type, float value);
@@ -317,7 +341,6 @@ class Evse : public PollingComponent, public EvseHal {
 #ifdef USE_LIGHT
   EvseLed charging_led_;
   EvseLed error_led_;
-  EvseLed wifi_led_;
 #endif
   bool led_state_valid_{false};
   EvseState led_state_{EvseState::A};

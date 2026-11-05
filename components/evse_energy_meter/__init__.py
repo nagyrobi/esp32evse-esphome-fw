@@ -30,7 +30,7 @@ AUTO_LOAD = ["sensor", "voltage_sampler"]
 
 CONF_EVSE_ENERGY_METER_ID = "evse_energy_meter_id"
 CONF_ADC_SENSOR = "adc_sensor"
-CONF_RELAY = "relay"
+CONF_MONITORED_RELAY = "monitored_relay"
 CONF_SAMPLE_DURATION = "sample_duration"
 CONF_TOTAL_POWER = "total_power"
 CONF_TOTAL_ENERGY = "total_energy"
@@ -106,9 +106,13 @@ CONFIG_SCHEMA = cv.All(
                 device_class=DEVICE_CLASS_ENERGY,
                 state_class=STATE_CLASS_TOTAL_INCREASING,
             ),
-            # the currents are measured only while this switch (the AC relay) is on,
-            # otherwise they are 0, so the noise of the current inputs is not counted
-            cv.Optional(CONF_RELAY): cv.use_id(Switch),
+            # optional: the currents are measured only while this switch (the AC relay) is
+            # on, otherwise they are 0, so the noise of the current inputs is not counted
+            # (the noise can be removed with sensor filters too)
+            cv.Optional(CONF_MONITORED_RELAY): cv.use_id(Switch),
+            cv.Optional("relay"): cv.invalid(
+                "'relay' was renamed to 'monitored_relay'"
+            ),
             cv.Optional(CONF_SAMPLE_DURATION, default="40ms"): cv.All(
                 cv.positive_time_period_milliseconds,
                 cv.Range(
@@ -168,5 +172,5 @@ async def to_code(config):
     if conf := config.get(CONF_TOTAL_ENERGY):
         cg.add(var.set_total_energy_sensor(await new_sensor(conf)))
 
-    if (relay := config.get(CONF_RELAY)) is not None:
-        cg.add(var.set_relay(await cg.get_variable(relay)))
+    if (relay := config.get(CONF_MONITORED_RELAY)) is not None:
+        cg.add(var.set_monitored_relay(await cg.get_variable(relay)))

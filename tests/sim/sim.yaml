@@ -99,8 +99,6 @@ evse:
     sensor: pilot_adc
     levels: [2405, 2099, 1792, 1484, 728]
   relay: ac_relay
-  charging_led: led_charging
-  error_led: led_error
   authorization: authorized
   energy_meter:
     current_l1: current_l1
@@ -150,34 +148,26 @@ evse_energy_meter:
     name: Power
   total_energy:
     name: Total energy
-  relay: ac_relay
+  monitored_relay: ac_relay
   update_interval: 1s
 
-output:
-  - platform: template
-    id: led_charging_output
-    type: binary
-    write_action:
-      - logger.log:
-          format: "LED charging %s"
-          args: ['state ? "ON" : "off"']
-  - platform: template
-    id: led_error_output
-    type: binary
-    write_action:
-      - logger.log:
-          format: "LED error %s"
-          args: ['state ? "ON" : "off"']
-
 light:
-  - platform: binary
+  - platform: evse
+    type: charging
     id: led_charging
-    output: led_charging_output
-    restore_mode: ALWAYS_OFF
-  - platform: binary
+    pin: GPIO1
+    on_turn_on:
+      - logger.log: "LED charging ON"
+    on_turn_off:
+      - logger.log: "LED charging off"
+  - platform: evse
+    type: error
     id: led_error
-    output: led_error_output
-    restore_mode: ALWAYS_OFF
+    pin: GPIO2
+    on_turn_on:
+      - logger.log: "LED error ON"
+    on_turn_off:
+      - logger.log: "LED error off"
 
 switch:
   - platform: template
