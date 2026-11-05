@@ -92,8 +92,9 @@ evse:
 | `pilot.sensor` | required | `adc` sensor of the pilot feedback. It is sampled 250 times per measurement, use `update_interval: never` and no name. |
 | `pilot.levels` | required | Five thresholds in mV at the ADC input: `[12V, 9V, 6V, 3V, -12V]`, identical to esp32-evse. Use the `pilot_high_voltage` / `pilot_low_voltage` sensors to calibrate. |
 | `relay` | required | Switch of the AC contactor. Only the EVSE switches it, external changes are reverted. Must use `restore_mode: ALWAYS_OFF`. |
-| `rcm.pin` | – | Residual current monitor output, rising edge interrupt, input with pull-down by default. |
-| `rcm.test_pin` | – | Residual current monitor test input. The self test runs once per session when the vehicle connects; charging waits until it passes (500 ms timeout). |
+| `rcm` | – | Optional residual current monitor. Without it the RCM self test and monitoring are skipped completely, like esp32-evse on a board without RCM; the `rcm_triggered` / `rcm_selftest_fault` binary sensors then stay off (with a configuration warning). |
+| `rcm.pin` | required | Residual current monitor output, rising edge interrupt, input with pull-down by default. |
+| `rcm.test_pin` | required | Residual current monitor test input. The self test runs once per session when the vehicle connects; charging waits until it passes (500 ms timeout). |
 | `authorization` | – | Binary sensor or switch. Authorization is required only when this is set. A session is authorized when the vehicle connects while the source is on, or within `authorization_timeout` after it turned on (e.g. an RFID tag shown before plugging in). The authorization is valid until the vehicle disconnects. |
 | `authorization_timeout` | `60s` | Validity of an authorization made before the vehicle connects. |
 | `energy_meter` | – | Current (A) and voltage (V) sensors of the phases, from `evse_energy_meter` or any other meter: `current_l1` and `voltage_l1` (single phase), or `current_l1` … `current_l3` and `voltage_l1` … `voltage_l3` (three phase). The EVSE calculates the power (sum of V × I) and the session energy from their filtered values while the relay is closed. Needed for the session energy, the consumption limit and the under power limit. |
@@ -172,11 +173,11 @@ light:
 To light the WiFi LED while connected (like esp32-evse), add `on_connect: - light.turn_on:
 led_wifi` and `on_disconnect: - light.turn_off: led_wifi` to `wifi:`.
 
-**Button** (`platform: evse`): `clear_error` leaves the error state now instead of after
-60 s (pilot fault, diode short, RCM triggered, RCM self test fault). The state machine
-restarts from state A, so a fault that is still present trips again, and after an RCM
-error the RCM self test runs again before charging. Temperature errors are not cleared,
-they clear when the temperature is back to normal.
+**Button** (`platform: evse`, diagnostic entity category by default): `clear_error` leaves
+the error state now instead of after 60 s (pilot fault, diode short, RCM triggered, RCM
+self test fault). The state machine restarts from state A, so a fault that is still
+present trips again, and after an RCM error the RCM self test runs again before charging.
+Temperature errors are not cleared, they clear when the temperature is back to normal.
 
 ### Third party energy meter
 

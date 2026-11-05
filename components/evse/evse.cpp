@@ -61,7 +61,7 @@ void Rcm::setup(InternalGPIOPin *pin, GPIOPin *test_pin) {
 }
 
 bool Rcm::is_triggered() {
-  if (this->testing_ || !this->triggered_)
+  if (this->pin_ == nullptr || this->testing_ || !this->triggered_)
     return false;
   this->triggered_ = false;
   delayMicroseconds(1000);  // prevent from noise triggering
@@ -69,6 +69,8 @@ bool Rcm::is_triggered() {
 }
 
 void Rcm::selftest_start() {
+  if (this->test_pin_ == nullptr)
+    return;  // no RCM configured, selftest_poll() reports a failure
   this->triggered_ = false;
   this->test_pin_->digital_write(true);
   this->testing_ = true;
@@ -91,7 +93,8 @@ RcmSelftestResult Rcm::selftest_poll() {
 }
 
 void Rcm::selftest_cancel() {
-  this->test_pin_->digital_write(false);
+  if (this->test_pin_ != nullptr)
+    this->test_pin_->digital_write(false);
   this->testing_ = false;
   this->triggered_ = false;
 }
