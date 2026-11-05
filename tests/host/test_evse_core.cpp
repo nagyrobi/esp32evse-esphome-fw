@@ -93,6 +93,7 @@ class MockHal : public EvseHal {
   bool rcm_mock_triggered = false;
   RcmSelftestResult rcm_mock_result = RcmSelftestResult::PASSED;
   int rcm_selftest_starts = 0;
+  int rcm_selftest_polls = 0;
   int rcm_selftest_cancels = 0;
   int rcm_triggered_calls = 0;
   // temperature
@@ -124,7 +125,10 @@ class MockHal : public EvseHal {
     return t;
   }
   void rcm_selftest_start() override { this->rcm_selftest_starts++; }
-  RcmSelftestResult rcm_selftest_poll() override { return this->rcm_mock_result; }
+  RcmSelftestResult rcm_selftest_poll() override {
+    this->rcm_selftest_polls++;
+    return this->rcm_mock_result;
+  }
   void rcm_selftest_cancel() override { this->rcm_selftest_cancels++; }
   bool temperature_get_high(float *high) override {
     *high = this->temp_mock_high;
@@ -661,6 +665,29 @@ TEST(rcm_disabled_ignores_trigger) {
   ASSERT_EVSE(EvseState::B2, PILOT_MOCK_STATE_PWM, false);
   TEST_ASSERT_EQUAL(0, hal.rcm_triggered_calls);
   TEST_ASSERT_EQUAL(0, hal.rcm_selftest_starts);
+}
+
+TEST(rcm_not_configured_no_rcm_at_all) {
+  // like esp32-evse on a board without RCM: no self test, no trigger check, no waiting
+  hal.rcm_mock_triggered = true;
+  hal.rcm_mock_result = RcmSelftestResult::FAILED;
+
+  ev_connect_sequence();  // B1 -> B2 right in the next iteration
+  ev_charge_sequence();
+  hal.pilot_mock_up_voltage = PilotVoltage::V12;
+  evse.process();
+  ASSERT_EVSE(EvseState::A, PILOT_MOCK_STATE_HIGH, false);
+  ev_connect_sequence();
+  hal.pilot_mock_down_voltage_n12 = true;
+  evse.process();
+
+  TEST_ASSERT_FALSE(evse.is_rcm());
+  TEST_ASSERT_FALSE(evse.is_rcm_selftest_pending());
+  TEST_ASSERT_EQUAL(0, hal.rcm_selftest_starts);
+  TEST_ASSERT_EQUAL(0, hal.rcm_selftest_polls);
+  TEST_ASSERT_EQUAL(0, hal.rcm_selftest_cancels);
+  TEST_ASSERT_EQUAL(0, hal.rcm_triggered_calls);
+  TEST_ASSERT_EQUAL(0, evse.get_error());
 }
 
 TEST(temperature_high_and_fault) {

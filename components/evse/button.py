@@ -1,6 +1,7 @@
 import esphome.codegen as cg
 from esphome.components import button
 import esphome.config_validation as cv
+from esphome.const import ENTITY_CATEGORY_DIAGNOSTIC
 
 from . import CONF_EVSE_ID, Evse, evse_ns
 
@@ -18,6 +19,7 @@ CONFIG_SCHEMA = cv.Schema(
         # leave the error state now instead of after 60s (pilot fault, diode short, RCM)
         cv.Optional(CONF_CLEAR_ERROR): button.button_schema(
             ClearErrorButton,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
             icon="mdi:restart-alert",
         ),
     }

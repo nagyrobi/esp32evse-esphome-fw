@@ -1,3 +1,5 @@
+import logging
+
 import esphome.codegen as cg
 from esphome.components import binary_sensor
 import esphome.config_validation as cv
@@ -8,8 +10,11 @@ from esphome.const import (
     DEVICE_CLASS_PROBLEM,
     ENTITY_CATEGORY_DIAGNOSTIC,
 )
+import esphome.final_validate as fv
 
-from . import CONF_EVSE_ID, Evse, evse_ns
+from . import CONF_EVSE_ID, CONF_RCM, CONF_TEMPERATURE_SENSORS, Evse, evse_ns
+
+_LOGGER = logging.getLogger(__name__)
 
 DEPENDENCIES = ["evse"]
 
@@ -100,6 +105,32 @@ CONFIG_SCHEMA = cv.Schema(
         },
     }
 )
+
+
+# fault sensors of optional features: the feature (evse key) they need
+FEATURE_SENSORS = {
+    "rcm_triggered": CONF_RCM,
+    "rcm_selftest_fault": CONF_RCM,
+    "temperature_high": CONF_TEMPERATURE_SENSORS,
+    "temperature_fault": CONF_TEMPERATURE_SENSORS,
+}
+
+
+def _warn_unused_fault_sensors(config):
+    full_config = fv.full_config.get()
+    evse_path = full_config.get_path_for_id(config[CONF_EVSE_ID])[:-1]
+    evse_config = full_config.get_config_for_path(evse_path)
+    for key, feature in FEATURE_SENSORS.items():
+        if key in config and feature not in evse_config:
+            _LOGGER.warning(
+                "evse binary sensor %s stays off: '%s' is not configured in evse",
+                key,
+                feature,
+            )
+    return config
+
+
+FINAL_VALIDATE_SCHEMA = _warn_unused_fault_sensors
 
 
 async def to_code(config):
