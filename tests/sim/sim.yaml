@@ -102,19 +102,55 @@ evse:
   charging_led: led_charging
   error_led: led_error
   authorization: authorized
-  energy_meter: energy_meter
+  energy_meter:
+    current_l1: current_l1
+    current_l2: current_l2
+    current_l3: current_l3
+    voltage_l1: voltage_l1
+    voltage_l2: voltage_l2
+    voltage_l3: voltage_l3
   temperature_sensors: [evse_temperature]
   update_interval: 2s
 
 evse_energy_meter:
   id: energy_meter
-  three_phase: true
-  current:
-    sensors: [adc_current_l1, adc_current_l2, adc_current_l3]
-    scale: 0.090909091
-  voltage:
-    sensors: [adc_voltage_l1, adc_voltage_l2, adc_voltage_l3]
-    scale: 0.47
+  current_l1:
+    id: current_l1
+    name: Current L1
+    adc_sensor: adc_current_l1
+    filters:
+      - multiply: 0.090909091
+  current_l2:
+    id: current_l2
+    adc_sensor: adc_current_l2
+    filters:
+      - multiply: 0.090909091
+  current_l3:
+    id: current_l3
+    adc_sensor: adc_current_l3
+    filters:
+      - multiply: 0.090909091
+  voltage_l1:
+    id: voltage_l1
+    name: Voltage L1
+    adc_sensor: adc_voltage_l1
+    filters:
+      - multiply: 0.47
+  voltage_l2:
+    id: voltage_l2
+    adc_sensor: adc_voltage_l2
+    filters:
+      - multiply: 0.47
+  voltage_l3:
+    id: voltage_l3
+    adc_sensor: adc_voltage_l3
+    filters:
+      - multiply: 0.47
+  total_power:
+    name: Power
+  total_energy:
+    name: Total energy
+  relay: ac_relay
   update_interval: 1s
 
 output:
@@ -176,16 +212,6 @@ sensor:
       name: Session time
     charging_time:
       name: Charging time
-  - platform: evse_energy_meter
-    voltage_l1:
-      name: Voltage L1
-    current_l1:
-      name: Current L1
-    power:
-      name: Power
-    total_energy:
-      name: Total energy
-
 binary_sensor:
   - platform: evse
     error:

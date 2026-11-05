@@ -831,6 +831,28 @@ TEST(no_meter_ignores_power_limits) {
   TEST_ASSERT_FALSE(evse.is_limit_reached());
 }
 
+TEST(under_power_unknown_power) {
+  evse.set_under_power_limit(1000);
+  ev_connect_sequence();
+  ev_charge_sequence();
+
+  // the meter has no valid value
+  hal.energy_meter_mock_power = UINT32_MAX;
+  for (int i = 0; i < 3; i++) {
+    hal.step(61000);
+    evse.process();
+  }
+  ASSERT_EVSE(EvseState::C2, PILOT_MOCK_STATE_PWM, true);
+  TEST_ASSERT_FALSE(evse.is_limit_reached());
+
+  // valid again, below the limit: reached after 1 min
+  hal.energy_meter_mock_power = 500;
+  evse.process();
+  hal.step(61000);
+  evse.process();
+  ASSERT_EVSE(EvseState::C1, PILOT_MOCK_STATE_HIGH, true);
+}
+
 TEST(under_power_reset_by_authorize) {
   evse.set_under_power_limit(1000);
   ev_connect_sequence();

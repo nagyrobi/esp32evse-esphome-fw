@@ -7,7 +7,10 @@ ESPHome re-implementation of the EVSE (electric vehicle charger) controller of
 | Component | Ported from esp32-evse | What it does |
 |---|---|---|
 | `evse` | `components/evse` (state machine), `pilot.c`, `rcm.c`, LED handling of `main.c` | J1772 / IEC 61851 state machine, control pilot, AC relay, residual current monitor, LEDs, authorization, limits, temperature protection |
-| `evse_energy_meter` | `energy_meter.c` | RMS current / voltage measurement (single or three phase), power, persistent total energy |
+| `evse_energy_meter` | `energy_meter.c` | Current and voltage sensors (true RMS of ADC inputs, single or three phase), total power, persistent total energy |
+
+The `evse` takes the current and voltage of the phases from sensors, so it works with
+`evse_energy_meter` or with any other ESPHome energy meter.
 
 Everything else of the board (aux inputs / outputs, analog input, UARTs / RS-485,
 1-Wire temperature sensors, button) uses standard ESPHome components. Socket lock,
@@ -29,9 +32,10 @@ the pins, attenuation and calibration.
 
 1. Copy [`esp32s2da.yaml`](esp32s2da.yaml) into your ESPHome configuration directory
    and create the referenced secrets (see [`secrets.example.yaml`](secrets.example.yaml)).
-2. Review the board specific values (marked in the file), especially `three_phase`,
-   `maximum_charging_current`, the pilot `levels` and the energy meter `scale` factors
-   (copy them from your esp32-evse `board.yaml`).
+2. Review the board specific values (marked in the file), especially the phases of the
+   energy meter (single or three), `maximum_charging_current`, the pilot `levels` and the
+   `multiply` filters of the energy meter (the `scale` values of your esp32-evse
+   `board.yaml`).
 3. Flash the first time over USB / serial (the ESPHome partition table differs from
    esp32-evse), later updates go over the air. All esp32-evse settings are lost.
 
@@ -53,8 +57,8 @@ On the ESP32-S2 the ADC1 channel *N* is `GPIO(N+1)`.
 | `acRelay.gpios: [21]` | `gpio` switch `ac_relay` on GPIO21, `restore_mode: ALWAYS_OFF` |
 | `rcm.gpio: 41`, `rcm.testGpio: 26` | `evse.rcm.pin` / `evse.rcm.test_pin` |
 | `leds.charging/error/wifi` | `binary` lights on GPIO36 / GPIO37 / GPIO35 |
-| `energyMeter.current.adcChannels: [4, 5, 6]`, `scale` | `adc` sensors on GPIO5, 6, 7, `evse_energy_meter.current` |
-| `energyMeter.voltage.adcChannels: [7, 8, 9]`, `scale` | `adc` sensors on GPIO8, 9, 10, `evse_energy_meter.voltage` |
+| `energyMeter.current.adcChannels: [4, 5, 6]`, `scale` | `adc` sensors on GPIO5, 6, 7, `evse_energy_meter` `current_l1` … `current_l3` with a `multiply: <scale>` filter |
+| `energyMeter.voltage.adcChannels: [7, 8, 9]`, `scale` | `adc` sensors on GPIO8, 9, 10, `evse_energy_meter` `voltage_l1` … `voltage_l3` with a `multiply: <scale>` filter |
 | `button.gpio: 0` | `gpio` binary sensor, hold 10 s for factory reset |
 | `aux.inputs` IN1 / IN2 | `gpio` binary sensors on GPIO11 / GPIO2 |
 | `aux.outputs` OUT1..OUT4 | `gpio` switches on GPIO17 / 16 / 15 / 14 |
@@ -78,7 +82,9 @@ evse:
   error_led: led_error
   wifi_led: led_wifi
   authorization: rfid_ok     # optional binary_sensor or switch
-  energy_meter: energy_meter # optional evse_energy_meter
+  energy_meter:              # optional, current (A) and voltage (V) sensors of any meter
+    current_l1: current_l1
+    voltage_l1: voltage_l1
   temperature_sensors: [evse_temperature]  # optional
 ```
 
@@ -93,7 +99,7 @@ evse:
 | `charging_led`, `error_led`, `wifi_led` | – | Lights, driven like the esp32-evse LEDs (see below). Use `restore_mode: ALWAYS_OFF`. |
 | `authorization` | – | Binary sensor or switch. Authorization is required only when this is set. A session is authorized when the vehicle connects while the source is on, or within `authorization_timeout` after it turned on (e.g. an RFID tag shown before plugging in). The authorization is valid until the vehicle disconnects. |
 | `authorization_timeout` | `60s` | Validity of an authorization made before the vehicle connects. |
-| `energy_meter` | – | `evse_energy_meter` component, needed for the session energy, consumption limit and under power limit. |
+| `energy_meter` | – | Current (A) and voltage (V) sensors of the phases, from `evse_energy_meter` or any other meter: `current_l1` and `voltage_l1` (single phase), or `current_l1` … `current_l3` and `voltage_l1` … `voltage_l3` (three phase). The EVSE calculates the power (sum of V × I) and the session energy from their filtered values while the relay is closed. Needed for the session energy, the consumption limit and the under power limit. |
 | `temperature_sensors` | – | Sensors (e.g. `dallas_temp`), enables the `temperature_high` / `temperature_fault` errors. |
 | `temperature_threshold` | `60°C` | Factory default of the temperature limit (40–80 °C). |
 | `temperature_timeout` | `2min` | `temperature_fault` when a sensor has no valid value for this time. |
@@ -151,13 +157,54 @@ restarts from state A, so a fault that is still present trips again, and after a
 error the RCM self test runs again before charging. Temperature errors are not cleared,
 they clear when the temperature is back to normal.
 
+### Third party energy meter
+
+Any sensors in A and V can feed the EVSE, e.g. an SDM630 over Modbus:
+
+```yaml
+sensor:
+  - platform: sdm_meter
+    phase_a:
+      current: {id: sdm_current_l1, name: Current L1}
+      voltage: {id: sdm_voltage_l1, name: Voltage L1}
+    phase_b:
+      current: {id: sdm_current_l2, name: Current L2}
+      voltage: {id: sdm_voltage_l2, name: Voltage L2}
+    phase_c:
+      current: {id: sdm_current_l3, name: Current L3}
+      voltage: {id: sdm_voltage_l3, name: Voltage L3}
+
+evse:
+  energy_meter:
+    current_l1: sdm_current_l1
+    current_l2: sdm_current_l2
+    current_l3: sdm_current_l3
+    voltage_l1: sdm_voltage_l1
+    voltage_l2: sdm_voltage_l2
+    voltage_l3: sdm_voltage_l3
+```
+
+The session energy is integrated from the latest values, so its accuracy depends on the
+update interval of the meter; the energy counter of the meter itself is the reference
+for billing. Without current measurement, template sensors can provide estimated values.
+
 ### Filters
 
-The EVSE logic does not use the published states of its own sensors: the state machine,
-the limits and the session energy work with the internal, unfiltered values of `evse` and
-`evse_energy_meter`. Filters on the `platform: evse` and `platform: evse_energy_meter`
-sensors (e.g. `throttle_average`, `delta`, `multiply`) only change what is published to
-Home Assistant and automations. For example the total energy in kWh:
+The EVSE calculates with the **filtered** values of the sensors it references:
+
+* `energy_meter`: the power and the session energy (and so the consumption and under
+  power limits) use the filtered current and voltage values. Calibration filters
+  (`multiply`, `calibrate_linear`, ...) belong to these sensors. A throttling filter also
+  slows down the power updates of the EVSE.
+* `temperature_sensors`: a smoothing filter delays the over temperature error, a filter
+  that drops values may cause `temperature_fault` after `temperature_timeout`.
+* `authorization`: the filtered state of the binary sensor (e.g. `delayed_on`).
+* The `adc` sensors of the pilot and of `evse_energy_meter` are sampled directly, their
+  filters are not used.
+
+The other sensors are outputs: filters on the `platform: evse` sensors and on `total_power`
+/ `total_energy` of `evse_energy_meter` only change what is published to Home Assistant
+and automations. For example the total energy in kWh:
 
 ```yaml
     total_energy:
@@ -168,9 +215,12 @@ Home Assistant and automations. For example the total energy in kWh:
         - multiply: 0.001
 ```
 
-To publish less often, prefer filters (e.g. `throttle_average: 10s` for the power, voltage
-and current, `throttle: 10s` for the total energy) over a longer `update_interval` of the
-energy meter, which is also the interval of the energy integration.
+To publish less often, use filters (e.g. `throttle_average: 10s` for the power, `throttle:
+10s` for the total energy) instead of a longer `update_interval` of the energy meter,
+which is also the interval of the energy integration. To publish the current and voltage
+less often without slowing down the EVSE, keep the referenced sensors internal (no
+`name`) and publish [`copy`](https://esphome.io/components/sensor/copy/) sensors with
+a `throttle_average` filter.
 
 Inputs that the EVSE reads from other entities are different:
 
@@ -221,60 +271,72 @@ The state machine (`components/evse/evse_core.*`) is a line by line port of
 * The authorization source is level and edge sensitive (see `authorization`).
 * Without an energy meter the consumption and under power limits are ignored.
 * `enable` / `available` are restored after reboot by default.
+* The EVSE takes the current and voltage from sensors, any energy meter can be used.
 * The energy meter measures every second (esp32-evse: every 50 ms) and integrates the
-  energy with the trapezoidal rule, so the main loop is blocked much less.
+  energy with the trapezoidal rule, so the main loop is blocked much less. It measures
+  the voltages continuously, the currents while the relay is on.
 
 ## `evse_energy_meter` component
 
-```yaml
-evse_energy_meter:
-  id: energy_meter
-  three_phase: true
-  current:
-    sensors: [adc_current_l1, adc_current_l2, adc_current_l3]
-    scale: 0.090909091
-  voltage:
-    sensors: [adc_voltage_l1, adc_voltage_l2, adc_voltage_l3]
-    scale: 0.47
-```
-
-Single phase installation: list only the L1 inputs (a single id without the brackets
-works too) and leave out the L2 / L3 `adc` sensors and the `*_l2` / `*_l3` meter sensors.
-With `three_phase: false` only L1 is measured, extra inputs are ignored (with a warning).
+The current and voltage of each phase are standard ESPHome sensors, so they take the usual
+options (`name`, `filters`, ...) and the `evse` references them by id. Their raw value is
+the true RMS voltage at the ADC input in mV (DC offset removed); a filter converts it to A
+or V, the `scale` of the esp32-evse `board.yaml` is a `multiply` filter.
 
 ```yaml
 evse_energy_meter:
-  id: energy_meter
-  three_phase: false
-  current:
-    sensors: [adc_current_l1]
-    scale: 0.090909091
-  voltage:
-    sensors: [adc_voltage_l1]
-    scale: 0.47
+  current_l1:
+    id: current_l1
+    name: Current L1
+    adc_sensor: adc_current_l1
+    filters:
+      - multiply: 0.090909091
+  current_l2:
+    id: current_l2
+    adc_sensor: adc_current_l2
+    filters:
+      - multiply: 0.090909091
+  current_l3:
+    id: current_l3
+    adc_sensor: adc_current_l3
+    filters:
+      - multiply: 0.090909091
+  voltage_l1:
+    id: voltage_l1
+    name: Voltage L1
+    adc_sensor: adc_voltage_l1
+    filters:
+      - multiply: 0.47
+  voltage_l2:
+    id: voltage_l2
+    adc_sensor: adc_voltage_l2
+    filters:
+      - multiply: 0.47
+  voltage_l3:
+    id: voltage_l3
+    adc_sensor: adc_voltage_l3
+    filters:
+      - multiply: 0.47
+  total_power:
+    name: Power
+  total_energy:
+    name: Total energy
+  relay: ac_relay
 ```
+
+The phases follow from the configuration: `current_l1` and `voltage_l1` only is a single
+phase meter, all of `current_l1` … `current_l3` and `voltage_l1` … `voltage_l3` a three
+phase meter, other combinations are rejected.
 
 | Option | Default | Description |
 |---|---|---|
-| `three_phase` | `false` | Three phase installation. With a single current / voltage input its value is used for all phases. |
-| `current.sensors` | – | 1 or 3 `adc` sensors (L1, L2, L3), `attenuation: 12db`, `update_interval: never`. Without current inputs the current is estimated from the charging current (esp32-evse "dummy" mode). |
-| `current.scale` | required | A per mV RMS at the ADC input, the same value as in esp32-evse `board.yaml`. |
-| `voltage.sensors` | – | 1 or 3 `adc` sensors. Without voltage inputs `ac_voltage` is used. |
-| `voltage.scale` | required | V per mV RMS at the ADC input, the same value as in esp32-evse `board.yaml`. |
-| `ac_voltage` | `230V` | Voltage used when it is not measured. |
-| `sample_duration` | `40ms` | RMS window, a whole number of mains periods: 40 ms at 50 Hz, 33 ms or 50 ms at 60 Hz. |
-| `update_interval` | `1s` | Measurement interval while charging. |
-
-The meter measures only while charging (relay closed), otherwise voltage, current and
-power are 0, like in esp32-evse. Power is the apparent power, the sum of Vrms × Irms.
-Each measurement samples the inputs in a tight loop for `sample_duration` (blocking, like
-esp32-evse) and removes the DC offset; the energy is integrated with the trapezoidal rule
-between the measurements.
-The total energy is persistent (written to flash at most once per
-[`flash_write_interval`](https://esphome.io/components/preferences/)).
-
-**Sensors** (`platform: evse_energy_meter`): `voltage_l1`, `voltage_l2`, `voltage_l3` (V),
-`current_l1`, `current_l2`, `current_l3` (A), `power` (W), `total_energy` (Wh).
+| `current_l1` … `current_l3` | `current_l1` required | Current sensors. `adc_sensor`: the `adc` sensor of the input (`attenuation: 12db`, `update_interval: never`, no name). A configuration warning reminds you when there are no `filters`. |
+| `voltage_l1` … `voltage_l3` | `voltage_l1` required | Voltage sensors, like the currents. |
+| `total_power` | – | Apparent power in W, the sum of V × I of the phases calculated from the filtered values. |
+| `total_energy` | – | Energy in Wh, integrated from the total power with the trapezoidal rule, persistent (written to flash at most once per [`flash_write_interval`](https://esphome.io/components/preferences/)). |
+| `relay` | – | Switch of the AC relay. The currents are measured only while it is on, otherwise they are 0, so the noise of the current inputs is not counted as energy (esp32-evse measured only while charging). Strongly recommended. |
+| `sample_duration` | `40ms` | RMS window, a whole number of mains periods: 40 ms at 50 Hz, 33 ms or 50 ms at 60 Hz. The inputs are sampled in a tight loop for this time (blocking, like esp32-evse). |
+| `update_interval` | `1s` | Measurement interval. |
 
 **Button** (`platform: evse_energy_meter`): `reset_total_energy`.
 

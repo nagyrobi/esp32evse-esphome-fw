@@ -11,9 +11,10 @@
 //  * LEDs: ESPHome lights
 //  * authorization: binary sensor or switch
 //  * temperature: ESPHome sensors
-//  * energy: evse_energy_meter component
+//  * energy: current / voltage sensors of any energy meter
 // and exposes everything as ESPHome entities.
 
+#include <algorithm>
 #include <vector>
 
 #include "esphome/core/component.h"
@@ -42,9 +43,6 @@
 #endif
 #ifdef USE_BUTTON
 #include "esphome/components/button/button.h"
-#endif
-#ifdef USE_EVSE_ENERGY_METER
-#include "esphome/components/evse_energy_meter/evse_energy_meter.h"
 #endif
 
 #include "evse_core.h"
@@ -208,10 +206,13 @@ class Evse : public PollingComponent, public EvseHal {
 #endif
   void set_authorization_switch(switch_::Switch *sw) { this->auth_switch_ = sw; }
   void set_authorization_timeout(uint32_t timeout) { this->auth_timeout_ = timeout; }
-#ifdef USE_EVSE_ENERGY_METER
-  void set_energy_meter(evse_energy_meter::EvseEnergyMeter *meter) { this->energy_meter_ = meter; }
-#endif
 #ifdef USE_SENSOR
+  /// Energy meter: current (A) and voltage (V) sensors of the phases, the filtered values are used
+  void set_meter_current(uint8_t phase, sensor::Sensor *sensor) {
+    this->meter_currents_[phase] = sensor;
+    this->meter_phases_ = std::max<uint8_t>(this->meter_phases_, phase + 1);
+  }
+  void set_meter_voltage(uint8_t phase, sensor::Sensor *sensor) { this->meter_voltages_[phase] = sensor; }
   void add_temperature_sensor(sensor::Sensor *sensor);
 #endif
   void set_temperature_timeout(uint32_t timeout) { this->temperature_timeout_ = timeout; }
@@ -290,6 +291,8 @@ class Evse : public PollingComponent, public EvseHal {
   void save_number_(EvseNumberType type, float value);
 #endif
   float get_session_energy_() const;
+  /// Apparent power (sum of V * I of the phases) from the meter sensors, false if unknown
+  bool meter_power_(float *power) const;
   uint32_t get_session_time_();
 
   EvseCore core_;
@@ -340,15 +343,16 @@ class Evse : public PollingComponent, public EvseHal {
   uint32_t setup_time_{0};
 
   // energy meter and session
-#ifdef USE_EVSE_ENERGY_METER
-  evse_energy_meter::EvseEnergyMeter *energy_meter_{nullptr};
+#ifdef USE_SENSOR
+  sensor::Sensor *meter_currents_[3]{};
+  sensor::Sensor *meter_voltages_[3]{};
 #endif
+  uint8_t meter_phases_{0};  // 0: no energy meter
   bool has_session_{false};
   uint64_t session_start_{0};
   uint64_t charging_time_{0};  // ms
   uint64_t last_process_time_{0};
   double session_energy_{0.0};  // Wh
-  double last_total_energy_{0.0};
 
   // settings
   uint8_t max_charging_current_{32};

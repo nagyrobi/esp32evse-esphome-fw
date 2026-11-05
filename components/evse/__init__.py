@@ -57,10 +57,9 @@ CONF_DEFAULT_UNDER_POWER_LIMIT = "default_under_power_limit"
 evse_ns = cg.esphome_ns.namespace("evse")
 Evse = evse_ns.class_("Evse", cg.PollingComponent)
 
-# separate external component, declared here by name so it does not need to be imported
-EvseEnergyMeter = cg.esphome_ns.namespace("evse_energy_meter").class_(
-    "EvseEnergyMeter", cg.PollingComponent
-)
+PHASES = ("l1", "l2", "l3")
+METER_CURRENTS = tuple(f"current_{phase}" for phase in PHASES)
+METER_VOLTAGES = tuple(f"voltage_{phase}" for phase in PHASES)
 
 LEVEL_NAMES = ("12V", "9V", "6V", "3V", "-12V")
 
@@ -89,6 +88,33 @@ def validate_max_current(value):
 
 energy_wh = cv.float_with_unit("energy", "(Wh)", optional_unit=True)
 power_w = cv.float_with_unit("power", "(W)", optional_unit=True)
+
+
+def validate_phases(config):
+    """Either current_l1 and voltage_l1 (single phase) or all six sensors (three phase)."""
+    l2_l3 = [key for key in METER_CURRENTS[1:] + METER_VOLTAGES[1:] if key in config]
+    if l2_l3 and len(l2_l3) != 4:
+        raise cv.Invalid(
+            "Configure either current_l1 and voltage_l1 (single phase), or current_l1, "
+            "current_l2, current_l3, voltage_l1, voltage_l2 and voltage_l3 (three phase)"
+        )
+    return config
+
+
+# Any sensors in A and V, e.g. of evse_energy_meter or a third party meter (sdm_meter...).
+ENERGY_METER_SCHEMA = cv.All(
+    cv.Schema(
+        {
+            cv.Required(METER_CURRENTS[0]): cv.use_id(Sensor),
+            cv.Optional(METER_CURRENTS[1]): cv.use_id(Sensor),
+            cv.Optional(METER_CURRENTS[2]): cv.use_id(Sensor),
+            cv.Required(METER_VOLTAGES[0]): cv.use_id(Sensor),
+            cv.Optional(METER_VOLTAGES[1]): cv.use_id(Sensor),
+            cv.Optional(METER_VOLTAGES[2]): cv.use_id(Sensor),
+        }
+    ),
+    validate_phases,
+)
 
 PILOT_SCHEMA = cv.Schema(
     {
@@ -123,7 +149,7 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(
             CONF_AUTHORIZATION_TIMEOUT, default="60s"
         ): cv.positive_time_period_milliseconds,
-        cv.Optional(CONF_ENERGY_METER): cv.use_id(EvseEnergyMeter),
+        cv.Optional(CONF_ENERGY_METER): ENERGY_METER_SCHEMA,
         cv.Optional(CONF_TEMPERATURE_SENSORS): cv.ensure_list(cv.use_id(Sensor)),
         cv.Optional(CONF_TEMPERATURE_THRESHOLD, default=60): cv.All(
             cv.temperature, cv.Range(min=40, max=80), cv.int_
@@ -251,7 +277,17 @@ async def to_code(config):
     cg.add(var.set_authorization_timeout(config[CONF_AUTHORIZATION_TIMEOUT]))
 
     if (meter := config.get(CONF_ENERGY_METER)) is not None:
-        cg.add(var.set_energy_meter(await cg.get_variable(meter)))
+        for phase, (current, voltage) in enumerate(
+            zip(METER_CURRENTS, METER_VOLTAGES, strict=True)
+        ):
+            if current in meter:
+                cg.add(
+                    var.set_meter_current(phase, await cg.get_variable(meter[current]))
+                )
+            if voltage in meter:
+                cg.add(
+                    var.set_meter_voltage(phase, await cg.get_variable(meter[voltage]))
+                )
 
     for temperature_sensor in config.get(CONF_TEMPERATURE_SENSORS, []):
         cg.add(var.add_temperature_sensor(await cg.get_variable(temperature_sensor)))
