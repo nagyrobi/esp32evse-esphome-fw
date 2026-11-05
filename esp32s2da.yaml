@@ -49,6 +49,11 @@ ota:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
+  # optional, to light the WiFi LED (status_led) while connected:
+  # on_connect:
+  #   - light.turn_on: led_wifi
+  # on_disconnect:
+  #   - light.turn_off: led_wifi
 
 # ---------------------------------------------------------------------------
 # EVSE
@@ -68,9 +73,6 @@ evse:
       # GPIO26 is the PSRAM chip select of S2 modules with PSRAM; it is free on the
       # ESP32-S2-WROOM of this board (esp32-evse uses it as the RCM test pin)
       ignore_pin_validation_error: true
-  charging_led: led_charging
-  error_led: led_error
-  wifi_led: led_wifi
   # Current (A) and voltage (V) sensors of the energy meter: the evse_energy_meter below
   # or any other meter (e.g. sdm_meter). Single phase: only current_l1 and voltage_l1.
   energy_meter:
@@ -141,8 +143,9 @@ evse_energy_meter:
     name: Power
   total_energy:
     name: Total energy
-  # currents only while the relay is on, so the noise of the current inputs is not counted
-  relay: ac_relay
+  # optional: currents only while the relay is on, so the noise of the current inputs is not
+  # counted (or remove the noise with a filter of the current sensors)
+  monitored_relay: ac_relay
   sample_duration: 40ms  # 2 periods at 50Hz, use 33ms or 50ms at 60Hz
   update_interval: 1s
 
@@ -155,15 +158,6 @@ output:
     id: pilot_pwm
     pin: GPIO33
     frequency: 1000Hz
-  - platform: gpio
-    id: led_charging_output
-    pin: GPIO36
-  - platform: gpio
-    id: led_error_output
-    pin: GPIO37
-  - platform: gpio
-    id: led_wifi_output
-    pin: GPIO35
 
 switch:
   # AC relay, controlled by the EVSE only (must be ALWAYS_OFF, keep it internal)
@@ -200,23 +194,24 @@ switch:
   #   restore_mode: ALWAYS_OFF
 
 light:
-  - platform: binary
+  # LEDs driven by the EVSE, like esp32-evse
+  - platform: evse
+    type: charging
     id: led_charging
     name: Charging LED
-    output: led_charging_output
-    restore_mode: ALWAYS_OFF
+    pin: GPIO36
     internal: true
-  - platform: binary
+  - platform: evse
+    type: error
     id: led_error
     name: Error LED
-    output: led_error_output
-    restore_mode: ALWAYS_OFF
+    pin: GPIO37
     internal: true
-  - platform: binary
+  # ESPHome status LED: blinks while WiFi / Home Assistant are not connected and on errors
+  - platform: status_led
     id: led_wifi
     name: WiFi LED
-    output: led_wifi_output
-    restore_mode: ALWAYS_OFF
+    pin: GPIO35
     internal: true
 
 one_wire:

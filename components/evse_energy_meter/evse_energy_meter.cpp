@@ -39,8 +39,8 @@ void EvseEnergyMeter::setup() {
   this->last_integration_ = millis();
 
 #ifdef USE_SWITCH
-  if (this->relay_ != nullptr) {
-    this->relay_->add_on_state_callback([this](bool state) { this->on_relay_(state); });
+  if (this->monitored_relay_ != nullptr) {
+    this->monitored_relay_->add_on_state_callback([this](bool state) { this->on_relay_(state); });
   }
 #endif
 }
@@ -48,13 +48,13 @@ void EvseEnergyMeter::setup() {
 void EvseEnergyMeter::dump_config() {
   bool relay = false;
 #ifdef USE_SWITCH
-  relay = this->relay_ != nullptr;
+  relay = this->monitored_relay_ != nullptr;
 #endif
   ESP_LOGCONFIG(TAG,
                 "EVSE energy meter:\n"
                 "  Phases: %u\n"
                 "  Sample duration: %" PRIu32 "ms\n"
-                "  Currents only while the relay is on: %s\n"
+                "  Currents only while the monitored relay is on: %s\n"
                 "  Total energy: %.0fWh",
                 (unsigned) this->phases_, this->sample_duration_us_ / 1000, YESNO(relay), this->total_energy_);
   LOG_UPDATE_INTERVAL(this);
@@ -70,8 +70,8 @@ void EvseEnergyMeter::dump_config() {
 
 bool EvseEnergyMeter::relay_closed_() const {
 #ifdef USE_SWITCH
-  if (this->relay_ != nullptr)
-    return this->relay_->state;
+  if (this->monitored_relay_ != nullptr)
+    return this->monitored_relay_->state;
 #endif
   return true;
 }

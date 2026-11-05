@@ -6,9 +6,6 @@
 #include <string>
 
 #include "esphome/core/log.h"
-#ifdef USE_WIFI
-#include "esphome/components/wifi/wifi_component.h"
-#endif
 
 namespace esphome {
 namespace evse {
@@ -220,7 +217,7 @@ void Evse::setup() {
 
 #ifdef USE_LIGHT
   this->update_leds_();
-  if (!this->charging_led_.has_light() && !this->error_led_.has_light() && !this->wifi_led_.has_light())
+  if (!this->charging_led_.has_light() && !this->error_led_.has_light())
     this->disable_loop();
 #else
   this->disable_loop();
@@ -294,10 +291,8 @@ void Evse::restore_settings_() {
 void Evse::loop() {
 #ifdef USE_LIGHT
   uint32_t now = millis();
-  this->update_wifi_led_();
   this->charging_led_.loop(now);
   this->error_led_.loop(now);
-  this->wifi_led_.loop(now);
 #endif
 }
 
@@ -618,27 +613,6 @@ void Evse::update_leds_() {
       this->error_led_.set_pattern(500, 500);
       break;
   }
-#endif
-}
-
-void Evse::update_wifi_led_() {
-#ifdef USE_LIGHT
-  if (!this->wifi_led_.has_light())
-    return;
-#ifdef USE_WIFI
-  wifi::WiFiComponent *wifi = wifi::global_wifi_component;
-  if (wifi == nullptr || wifi->is_disabled()) {
-    this->wifi_led_.set_pattern(0, 0);
-  } else if (wifi->is_connected()) {
-    this->wifi_led_.set_pattern(1, 0);
-  } else if (wifi->is_ap_active()) {
-    this->wifi_led_.set_pattern(100, 900);  // access point (fallback hotspot) active
-  } else {
-    this->wifi_led_.set_pattern(500, 500);  // connecting
-  }
-#else
-  this->wifi_led_.set_pattern(0, 0);
-#endif
 #endif
 }
 

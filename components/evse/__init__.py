@@ -8,7 +8,6 @@ import esphome.codegen as cg
 # Import the classes, not the modules: importing the platforms of this package
 # (evse.binary_sensor, evse.sensor, evse.switch) rebinds those module names here.
 from esphome.components.binary_sensor import BinarySensor
-from esphome.components.light import LightState
 from esphome.components.output import FloatOutput
 from esphome.components.sensor import Sensor
 from esphome.components.switch import Switch
@@ -141,9 +140,19 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Required(CONF_PILOT): PILOT_SCHEMA,
         cv.Required(CONF_RELAY): cv.use_id(Switch),
         cv.Optional(CONF_RCM): RCM_SCHEMA,
-        cv.Optional(CONF_CHARGING_LED): cv.use_id(LightState),
-        cv.Optional(CONF_ERROR_LED): cv.use_id(LightState),
-        cv.Optional(CONF_WIFI_LED): cv.use_id(LightState),
+        # moved / removed options
+        cv.Optional(CONF_CHARGING_LED): cv.invalid(
+            "The charging LED is a light of the evse light platform now: "
+            "'light: - platform: evse, type: charging, pin: GPIO36'"
+        ),
+        cv.Optional(CONF_ERROR_LED): cv.invalid(
+            "The error LED is a light of the evse light platform now: "
+            "'light: - platform: evse, type: error, pin: GPIO37'"
+        ),
+        cv.Optional(CONF_WIFI_LED): cv.invalid(
+            "The WiFi LED is not driven by the EVSE anymore, use a status_led light: "
+            "'light: - platform: status_led, pin: GPIO35'"
+        ),
         # binary_sensor or switch, authorization is required only when configured
         cv.Optional(CONF_AUTHORIZATION): cv.use_id(cg.EntityBase),
         cv.Optional(
@@ -259,14 +268,6 @@ async def to_code(config):
         pin = await cg.gpio_pin_expression(rcm[CONF_PIN])
         test_pin = await cg.gpio_pin_expression(rcm[CONF_TEST_PIN])
         cg.add(var.set_rcm_pins(pin, test_pin))
-
-    for key, setter in (
-        (CONF_CHARGING_LED, var.set_charging_led),
-        (CONF_ERROR_LED, var.set_error_led),
-        (CONF_WIFI_LED, var.set_wifi_led),
-    ):
-        if key in config:
-            cg.add(setter(await cg.get_variable(config[key])))
 
     if (auth := config.get(CONF_AUTHORIZATION)) is not None:
         full_id, auth_var = await cg.get_variable_with_full_id(auth)

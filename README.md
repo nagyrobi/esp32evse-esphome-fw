@@ -56,7 +56,8 @@ On the ESP32-S2 the ADC1 channel *N* is `GPIO(N+1)`.
 | `pilot.levels` | `evse.pilot.levels` (same values) |
 | `acRelay.gpios: [21]` | `gpio` switch `ac_relay` on GPIO21, `restore_mode: ALWAYS_OFF` |
 | `rcm.gpio: 41`, `rcm.testGpio: 26` | `evse.rcm.pin` / `evse.rcm.test_pin` |
-| `leds.charging/error/wifi` | `binary` lights on GPIO36 / GPIO37 / GPIO35 |
+| `leds.charging` / `leds.error` | `evse` lights (`type: charging` / `type: error`) on GPIO36 / GPIO37 |
+| `leds.wifi` | `status_led` light on GPIO35 |
 | `energyMeter.current.adcChannels: [4, 5, 6]`, `scale` | `adc` sensors on GPIO5, 6, 7, `evse_energy_meter` `current_l1` … `current_l3` with a `multiply: <scale>` filter |
 | `energyMeter.voltage.adcChannels: [7, 8, 9]`, `scale` | `adc` sensors on GPIO8, 9, 10, `evse_energy_meter` `voltage_l1` … `voltage_l3` with a `multiply: <scale>` filter |
 | `button.gpio: 0` | `gpio` binary sensor, hold 10 s for factory reset |
@@ -78,9 +79,6 @@ evse:
   rcm:                       # optional
     pin: GPIO41
     test_pin: GPIO26
-  charging_led: led_charging # optional lights
-  error_led: led_error
-  wifi_led: led_wifi
   authorization: rfid_ok     # optional binary_sensor or switch
   energy_meter:              # optional, current (A) and voltage (V) sensors of any meter
     current_l1: current_l1
@@ -96,7 +94,6 @@ evse:
 | `relay` | required | Switch of the AC contactor. Only the EVSE switches it, external changes are reverted. Must use `restore_mode: ALWAYS_OFF`. |
 | `rcm.pin` | – | Residual current monitor output, rising edge interrupt, input with pull-down by default. |
 | `rcm.test_pin` | – | Residual current monitor test input. The self test runs once per session when the vehicle connects; charging waits until it passes (500 ms timeout). |
-| `charging_led`, `error_led`, `wifi_led` | – | Lights, driven like the esp32-evse LEDs (see below). Use `restore_mode: ALWAYS_OFF`. |
 | `authorization` | – | Binary sensor or switch. Authorization is required only when this is set. A session is authorized when the vehicle connects while the source is on, or within `authorization_timeout` after it turned on (e.g. an RFID tag shown before plugging in). The authorization is valid until the vehicle disconnects. |
 | `authorization_timeout` | `60s` | Validity of an authorization made before the vehicle connects. |
 | `energy_meter` | – | Current (A) and voltage (V) sensors of the phases, from `evse_energy_meter` or any other meter: `current_l1` and `voltage_l1` (single phase), or `current_l1` … `current_l3` and `voltage_l1` … `voltage_l3` (three phase). The EVSE calculates the power (sum of V × I) and the session energy from their filtered values while the relay is closed. Needed for the session energy, the consumption limit and the under power limit. |
@@ -150,6 +147,30 @@ Default `restore_mode: RESTORE_DEFAULT_ON`, use `ALWAYS_ON` to get the esp32-evs
 **Sensors** (`platform: evse`): `session_energy` (Wh), `session_time` (s),
 `charging_time` (s), and for diagnostics / level calibration `pilot_high_voltage`,
 `pilot_low_voltage` (mV at the ADC input).
+
+**Lights** (`platform: evse`): the LEDs driven by the EVSE, directly on a pin (no `output`
+needed), one light per LED with `type: charging` or `type: error` (patterns in
+[States](#states)). They are standard binary lights (`name`, `internal`, triggers...).
+
+```yaml
+light:
+  - platform: evse
+    type: charging
+    id: led_charging
+    pin: GPIO36
+  - platform: evse
+    type: error
+    id: led_error
+    pin: GPIO37
+  # the WiFi LED is a plain ESPHome status LED: it blinks while WiFi / Home Assistant are
+  # not connected and on errors
+  - platform: status_led
+    id: led_wifi
+    pin: GPIO35
+```
+
+To light the WiFi LED while connected (like esp32-evse), add `on_connect: - light.turn_on:
+led_wifi` and `on_disconnect: - light.turn_off: led_wifi` to `wifi:`.
 
 **Button** (`platform: evse`): `clear_error` leaves the error state now instead of after
 60 s (pilot fault, diode short, RCM triggered, RCM self test fault). The state machine
@@ -247,8 +268,7 @@ Inputs that the EVSE reads from other entities are different:
 Charging is allowed when the EVSE is enabled, available, authorized, no limit is reached
 and the RCM self test passed. Pilot fault, diode short and RCM errors clear after 60 s
 or with the `clear_error` button, temperature errors when the temperature is back to
-normal. The WiFi LED is on when connected, blinks 500/500 ms while connecting and
-100/900 ms while the fallback hotspot (`wifi: ap:`) is active.
+normal.
 
 The `Evse` object can also be used from lambdas, e.g.
 `id(evse_controller).authorize();`, `id(evse_controller).clear_error();`,
@@ -321,7 +341,7 @@ evse_energy_meter:
     name: Power
   total_energy:
     name: Total energy
-  relay: ac_relay
+  monitored_relay: ac_relay  # optional
 ```
 
 The phases follow from the configuration: `current_l1` and `voltage_l1` only is a single
@@ -334,7 +354,7 @@ phase meter, other combinations are rejected.
 | `voltage_l1` … `voltage_l3` | `voltage_l1` required | Voltage sensors, like the currents. |
 | `total_power` | – | Apparent power in W, the sum of V × I of the phases calculated from the filtered values. |
 | `total_energy` | – | Energy in Wh, integrated from the total power with the trapezoidal rule, persistent (written to flash at most once per [`flash_write_interval`](https://esphome.io/components/preferences/)). |
-| `relay` | – | Switch of the AC relay. The currents are measured only while it is on, otherwise they are 0, so the noise of the current inputs is not counted as energy (esp32-evse measured only while charging). Strongly recommended. |
+| `monitored_relay` | – | Optional switch of the AC relay. The currents are measured only while it is on, otherwise they are 0, so the noise of the current inputs is not counted as energy (esp32-evse measured only while charging). Alternatively remove the noise with a filter of the current sensors, e.g. `- lambda: "return x < 0.5 ? 0.0f : x;"` after the `multiply`. |
 | `sample_duration` | `40ms` | RMS window, a whole number of mains periods: 40 ms at 50 Hz, 33 ms or 50 ms at 60 Hz. The inputs are sampled in a tight loop for this time (blocking, like esp32-evse). |
 | `update_interval` | `1s` | Measurement interval. |
 
