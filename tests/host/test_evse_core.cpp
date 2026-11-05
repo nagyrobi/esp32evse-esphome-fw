@@ -869,6 +869,120 @@ TEST(d2_from_c2) {
   ASSERT_EVSE(EvseState::C2, PILOT_MOCK_STATE_PWM, true);
 }
 
+TEST(clear_error_fault_gone) {
+  hal.pilot_mock_up_voltage = PilotVoltage::V1;
+  evse.process();
+  ASSERT_EVSE(EvseState::E, PILOT_MOCK_STATE_LOW, false);
+
+  // fault removed, cleared manually without waiting 1 min: E -> A
+  hal.pilot_mock_up_voltage = PilotVoltage::V12;
+  TEST_ASSERT_TRUE(evse.clear_error());
+  TEST_ASSERT_EQUAL(0, evse.get_error());
+  evse.process();
+  ASSERT_EVSE(EvseState::A, PILOT_MOCK_STATE_HIGH, false);
+  evse.process();
+  ASSERT_EVSE(EvseState::A, PILOT_MOCK_STATE_HIGH, false);
+}
+
+TEST(clear_error_fault_persists) {
+  hal.pilot_mock_up_voltage = PilotVoltage::V1;
+  evse.process();
+  ASSERT_EVSE(EvseState::E, PILOT_MOCK_STATE_LOW, false);
+
+  // the fault is still there: E -> A -> E
+  TEST_ASSERT_TRUE(evse.clear_error());
+  evse.process();
+  ASSERT_EVSE(EvseState::A, PILOT_MOCK_STATE_HIGH, false);
+  evse.process();
+  ASSERT_EVSE(EvseState::E, PILOT_MOCK_STATE_LOW, false);
+  TEST_ASSERT_TRUE(ERR_PILOT_FAULT_BIT & evse.get_error());
+
+  // the auto clear waits 1 min again from the new error
+  hal.pilot_mock_up_voltage = PilotVoltage::V12;
+  hal.step(30000);
+  evse.process();
+  TEST_ASSERT_EQUAL(EvseState::E, evse.get_state());
+  hal.step(31000);
+  evse.process();
+  ASSERT_EVSE(EvseState::A, PILOT_MOCK_STATE_HIGH, false);
+}
+
+TEST(clear_error_reconnected_vehicle) {
+  ev_connect_sequence();
+  hal.pilot_mock_down_voltage_n12 = false;  // diode short
+  evse.process();
+  ASSERT_EVSE(EvseState::E, PILOT_MOCK_STATE_LOW, false);
+
+  // vehicle still connected: E -> A -> B1 -> B2, a new session
+  hal.pilot_mock_down_voltage_n12 = true;
+  TEST_ASSERT_TRUE(evse.clear_error());
+  evse.process();
+  ASSERT_EVSE(EvseState::A, PILOT_MOCK_STATE_HIGH, false);
+  evse.process();
+  ASSERT_EVSE(EvseState::B1, PILOT_MOCK_STATE_HIGH, false);
+  evse.process();
+  ASSERT_EVSE(EvseState::B2, PILOT_MOCK_STATE_PWM, false);
+  TEST_ASSERT_EQUAL(2, hal.session_starts);
+}
+
+TEST(clear_error_rcm_selftest_again) {
+  evse.set_rcm(true);
+  ev_connect_sequence();
+  ev_charge_sequence();
+  hal.rcm_mock_triggered = true;
+  evse.process();
+  ASSERT_EVSE(EvseState::E, PILOT_MOCK_STATE_LOW, false);
+  TEST_ASSERT_TRUE(ERR_RCM_TRIGGERED_BIT & evse.get_error());
+  TEST_ASSERT_EQUAL(1, hal.rcm_selftest_starts);
+
+  // after clearing, the RCM is tested again before charging
+  TEST_ASSERT_TRUE(evse.clear_error());
+  hal.pilot_mock_up_voltage = PilotVoltage::V9;
+  evse.process();
+  ASSERT_EVSE(EvseState::A, PILOT_MOCK_STATE_HIGH, false);
+  evse.process();
+  ASSERT_EVSE(EvseState::B1, PILOT_MOCK_STATE_HIGH, false);
+  TEST_ASSERT_EQUAL(2, hal.rcm_selftest_starts);
+}
+
+TEST(clear_error_keeps_temperature_errors) {
+  evse.set_temperature_monitoring(true);
+  hal.temp_mock_valid = true;
+  hal.temp_mock_high = 70.0f;
+  evse.process();
+  ASSERT_EVSE(EvseState::E, PILOT_MOCK_STATE_LOW, false);
+
+  TEST_ASSERT_FALSE(evse.clear_error());
+  evse.process();
+  ASSERT_EVSE(EvseState::E, PILOT_MOCK_STATE_LOW, false);
+  TEST_ASSERT_TRUE(ERR_TEMPERATURE_HIGH_BIT & evse.get_error());
+
+  // with a pilot fault too, only the pilot fault is cleared
+  hal.pilot_mock_up_voltage = PilotVoltage::V1;
+  hal.temp_mock_high = 50.0f;
+  evse.process();  // temperature cleared, A
+  evse.process();  // pilot fault
+  hal.temp_mock_high = 70.0f;
+  evse.process();
+  TEST_ASSERT_EQUAL(ERR_PILOT_FAULT_BIT | ERR_TEMPERATURE_HIGH_BIT, evse.get_error());
+  hal.pilot_mock_up_voltage = PilotVoltage::V12;
+  TEST_ASSERT_TRUE(evse.clear_error());
+  evse.process();
+  TEST_ASSERT_EQUAL(ERR_TEMPERATURE_HIGH_BIT, evse.get_error());
+  TEST_ASSERT_EQUAL(EvseState::E, evse.get_state());
+}
+
+TEST(clear_error_without_error) {
+  TEST_ASSERT_FALSE(evse.clear_error());
+  evse.process();
+  ASSERT_EVSE(EvseState::A, PILOT_MOCK_STATE_HIGH, false);
+  ev_connect_sequence();
+  TEST_ASSERT_FALSE(evse.clear_error());
+  hal.pilot_mock_down_voltage_n12 = true;
+  evse.process();
+  ASSERT_EVSE(EvseState::B2, PILOT_MOCK_STATE_PWM, false);
+}
+
 TEST(state_strings) {
   TEST_ASSERT_TRUE(std::string("A") == evse_state_to_str(EvseState::A));
   TEST_ASSERT_TRUE(std::string("B1") == evse_state_to_str(EvseState::B1));

@@ -24,6 +24,8 @@ void EvSimulator::set_ev_state(char state) {
 }
 
 float EvSimulator::pilot_voltage() const {
+  if (this->ev_state_ == 'X')
+    return 0.0f;  // pilot shorted to PE
   float level = this->pilot_output_->get_level();
   bool high;
   if (level >= 0.9999f) {

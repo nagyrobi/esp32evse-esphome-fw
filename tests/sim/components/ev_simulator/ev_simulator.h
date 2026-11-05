@@ -35,7 +35,8 @@ class EvSimulator : public Component {
   void set_relay(switch_::Switch *relay) { this->relay_ = relay; }
   void set_pilot_output(PilotOutput *output) { this->pilot_output_ = output; }
 
-  /// 'A' (disconnected), 'B' (connected), 'C' (charging), 'D' (charging with ventilation)
+  /// 'A' (disconnected), 'B' (connected), 'C' (charging), 'D' (charging with ventilation),
+  /// 'X' (pilot shorted to PE)
   void set_ev_state(char state);
   char get_ev_state() const { return this->ev_state_; }
 

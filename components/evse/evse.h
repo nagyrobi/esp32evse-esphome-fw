@@ -40,6 +40,9 @@
 #ifdef USE_NUMBER
 #include "esphome/components/number/number.h"
 #endif
+#ifdef USE_BUTTON
+#include "esphome/components/button/button.h"
+#endif
 #ifdef USE_EVSE_ENERGY_METER
 #include "esphome/components/evse_energy_meter/evse_energy_meter.h"
 #endif
@@ -120,6 +123,13 @@ class EvseSwitch : public switch_::Switch, public Parented<Evse> {
   void write_state(bool state) override;
   EvseSwitchType type_{SWITCH_ENABLE};
 };
+
+#ifdef USE_BUTTON
+class ClearErrorButton : public button::Button, public Parented<Evse> {
+ protected:
+  void press_action() override;
+};
+#endif
 
 /// Residual current monitor: sense input with rising edge interrupt and a test output
 class Rcm {
@@ -238,6 +248,8 @@ class Evse : public PollingComponent, public EvseHal {
   EvseState get_state() const { return this->core_.get_state(); }
   uint32_t get_error() const { return this->core_.get_error(); }
   void authorize() { this->core_.authorize(); }
+  /// Clear pilot fault, diode short and RCM errors without waiting 60s, see EvseCore::clear_error()
+  bool clear_error() { return this->core_.clear_error(); }
   void set_enabled(bool enabled);
   void set_available(bool available);
   /// Charging current in A, clamped to 6A .. maximum charging current
