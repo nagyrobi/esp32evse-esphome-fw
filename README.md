@@ -1,0 +1,285 @@
+# ESPHome firmware for esp32-evse boards
+
+ESPHome re-implementation of the EVSE (electric vehicle charger) controller of
+[esp32-evse](https://github.com/dzurikmiroslav/esp32-evse), as two
+[external components](https://esphome.io/components/external_components/):
+
+| Component | Ported from esp32-evse | What it does |
+|---|---|---|
+| `evse` | `components/evse` (state machine), `pilot.c`, `rcm.c`, LED handling of `main.c` | J1772 / IEC 61851 state machine, control pilot, AC relay, residual current monitor, LEDs, authorization, limits, temperature protection |
+| `evse_energy_meter` | `energy_meter.c` | RMS current / voltage measurement (single or three phase), power, persistent total energy |
+
+Everything else of the board (aux inputs / outputs, analog input, UARTs / RS-485,
+1-Wire temperature sensors, button) uses standard ESPHome components. Socket lock,
+proximity, scheduler, AT commands, Nextion, Lua scripts and the Modbus / REST
+servers of esp32-evse are not ported.
+
+The example configuration [`esp32s2da.yaml`](esp32s2da.yaml) is a complete
+firmware for the **ESP32-S2-DA** board (`board-config/esp32s2da.yaml` of esp32-evse).
+It is validated and compiled with ESPHome 2026.10 (ESP-IDF), and the firmware logic is
+exercised in a simulation on the ESPHome host platform ([`tests/sim`](tests/sim)).
+**It has not been tested on the real hardware yet**, see [Safety](#safety).
+
+The ADC inputs (pilot feedback, current, voltage) are standard `adc` sensors that the
+components sample through ESPHome's `VoltageSampler` interface. This way they share the
+ADC unit with any other `adc` sensor (e.g. the IN3 analog input) and ESPHome handles
+the pins, attenuation and calibration.
+
+## Quick start
+
+1. Copy [`esp32s2da.yaml`](esp32s2da.yaml) into your ESPHome configuration directory
+   and create the referenced secrets (see [`secrets.example.yaml`](secrets.example.yaml)).
+2. Review the board specific values (marked in the file), especially `three_phase`,
+   `maximum_charging_current`, the pilot `levels` and the energy meter `scale` factors
+   (copy them from your esp32-evse `board.yaml`).
+3. Flash the first time over USB / serial (the ESPHome partition table differs from
+   esp32-evse), later updates go over the air. All esp32-evse settings are lost.
+
+```yaml
+external_components:
+  - source: github://nagyrobi/esp32evse-esphome-fw@main
+    components: [evse, evse_energy_meter]
+```
+
+## esp32-evse board.yaml to ESPHome
+
+On the ESP32-S2 the ADC1 channel *N* is `GPIO(N+1)`.
+
+| esp32-evse `board.yaml` | ESPHome (`esp32s2da.yaml`) |
+|---|---|
+| `pilot.gpio: 33` | `ledc` output `pilot_pwm` on GPIO33, 1000 Hz |
+| `pilot.adcChannel: 3` | `adc` sensor `pilot_adc` on GPIO4, `attenuation: 12db` |
+| `pilot.levels` | `evse.pilot.levels` (same values) |
+| `acRelay.gpios: [21]` | `gpio` switch `ac_relay` on GPIO21, `restore_mode: ALWAYS_OFF` |
+| `rcm.gpio: 41`, `rcm.testGpio: 26` | `evse.rcm.pin` / `evse.rcm.test_pin` |
+| `leds.charging/error/wifi` | `binary` lights on GPIO36 / GPIO37 / GPIO35 |
+| `energyMeter.current.adcChannels: [4, 5, 6]`, `scale` | `adc` sensors on GPIO5, 6, 7, `evse_energy_meter.current` |
+| `energyMeter.voltage.adcChannels: [7, 8, 9]`, `scale` | `adc` sensors on GPIO8, 9, 10, `evse_energy_meter.voltage` |
+| `button.gpio: 0` | `gpio` binary sensor, hold 10 s for factory reset |
+| `aux.inputs` IN1 / IN2 | `gpio` binary sensors on GPIO11 / GPIO2 |
+| `aux.outputs` OUT1..OUT4 | `gpio` switches on GPIO17 / 16 / 15 / 14 |
+| `aux.analogInputs` IN3 | `adc` sensor on GPIO1 |
+| `serials` UART / RS-485 | `uart` buses (RS-485 DE/RE is GPIO39, e.g. `modbus.flow_control_pin`) |
+| `onewire` | `one_wire` bus on GPIO42 + `dallas_temp` sensor |
+
+## `evse` component
+
+```yaml
+evse:
+  pilot:
+    output: pilot_pwm        # FloatOutput (ledc, frequency: 1000Hz)
+    sensor: pilot_adc        # adc sensor (attenuation: 12db, update_interval: never)
+    levels: [2405, 2099, 1792, 1484, 728]
+  relay: ac_relay            # switch, restore_mode: ALWAYS_OFF
+  rcm:                       # optional
+    pin: GPIO41
+    test_pin: GPIO26
+  charging_led: led_charging # optional lights
+  error_led: led_error
+  wifi_led: led_wifi
+  authorization: rfid_ok     # optional binary_sensor or switch
+  energy_meter: energy_meter # optional evse_energy_meter
+  temperature_sensors: [evse_temperature]  # optional
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `pilot.output` | required | Output driving the pilot: 100 % = +12 V, 0 % = −12 V, PWM for the charging current. Must be 1 kHz (checked for `ledc`), no `min_power`/`max_power`. |
+| `pilot.sensor` | required | `adc` sensor of the pilot feedback. It is sampled 250 times per measurement, use `update_interval: never` and no name. |
+| `pilot.levels` | required | Five thresholds in mV at the ADC input: `[12V, 9V, 6V, 3V, -12V]`, identical to esp32-evse. Use the `pilot_high_voltage` / `pilot_low_voltage` sensors to calibrate. |
+| `relay` | required | Switch of the AC contactor. Only the EVSE switches it, external changes are reverted. Must use `restore_mode: ALWAYS_OFF`. |
+| `rcm.pin` | – | Residual current monitor output, rising edge interrupt, input with pull-down by default. |
+| `rcm.test_pin` | – | Residual current monitor test input. The self test runs once per session when the vehicle connects; charging waits until it passes (500 ms timeout). |
+| `charging_led`, `error_led`, `wifi_led` | – | Lights, driven like the esp32-evse LEDs (see below). Use `restore_mode: ALWAYS_OFF`. |
+| `authorization` | – | Binary sensor or switch. Authorization is required only when this is set. A session is authorized when the vehicle connects while the source is on, or within `authorization_timeout` after it turned on (e.g. an RFID tag shown before plugging in). The authorization is valid until the vehicle disconnects. |
+| `authorization_timeout` | `60s` | Validity of an authorization made before the vehicle connects. |
+| `energy_meter` | – | `evse_energy_meter` component, needed for the session energy, consumption limit and under power limit. |
+| `temperature_sensors` | – | Sensors (e.g. `dallas_temp`), enables the `temperature_high` / `temperature_fault` errors. |
+| `temperature_threshold` | `60°C` | Factory default of the temperature limit (40–80 °C). |
+| `temperature_timeout` | `2min` | `temperature_fault` when a sensor has no valid value for this time. |
+| `maximum_charging_current` | `32A` | Factory default of the maximum charging current (6–63 A). |
+| `default_charging_current` | maximum | Factory default of the charging current after boot. |
+| `default_consumption_limit` | `0` | Factory default of the consumption limit in Wh (0 = no limit). |
+| `default_charging_time_limit` | `0s` | Factory default of the charging time limit (0 = no limit). |
+| `default_under_power_limit` | `0` | Factory default of the under power limit in W (0 = no limit). |
+| `update_interval` | `5s` | Publish interval of the session sensors. The state machine runs every 50 ms. |
+
+Each state machine iteration measures the pilot with 250 ADC samples, like esp32-evse.
+The duration of one measurement is logged at boot (`Pilot measurement: 250 samples in
+… us`); the samples should span a few 1 ms PWM periods.
+
+### Entities
+
+All entities are optional, add only what you need.
+
+**Numbers** (`platform: evse`). Like in esp32-evse, the runtime values start from
+their defaults after boot; the `default_*` values, the maximum charging current and the
+temperature threshold are persistent (the YAML values above are their factory defaults).
+
+| Key | Unit | Range | Persistent |
+|---|---|---|---|
+| `charging_current` | A | 6–63 (≤ maximum), step 0.1 | no |
+| `default_charging_current` | A | 6–63 (≤ maximum), step 0.1 | yes |
+| `maximum_charging_current` | A | 6–63 | yes |
+| `consumption_limit` | Wh | 0–1000000, 0 = off | no |
+| `default_consumption_limit` | Wh | 0–1000000 | yes |
+| `charging_time_limit` | s | 0–2592000, 0 = off | no |
+| `default_charging_time_limit` | s | 0–2592000 | yes |
+| `under_power_limit` | W | 0–65535, 0 = off | no |
+| `default_under_power_limit` | W | 0–65535 | yes |
+| `temperature_threshold` | °C | 40–80 | yes |
+
+**Switches** (`platform: evse`): `enable` (allow charging) and `available` (off = state F).
+Default `restore_mode: RESTORE_DEFAULT_ON`, use `ALWAYS_ON` to get the esp32-evse behaviour
+(always enabled after boot).
+
+**Text sensors** (`platform: evse`): `state` (`A`, `B1`, `B2`, `C1`, `C2`, `D1`, `D2`,
+`E`, `F`) and `errors` (comma separated error codes or `none`).
+
+**Binary sensors** (`platform: evse`): the error codes `pilot_fault`, `diode_short`,
+`rcm_triggered`, `rcm_selftest_fault`, `temperature_high`, `temperature_fault`; and
+`error` (any error), `limit_reached`, `pending_authorization`, `vehicle_connected`
+(states B1–D2), `charging` (C2, D2).
+
+**Sensors** (`platform: evse`): `session_energy` (Wh), `session_time` (s),
+`charging_time` (s), and for diagnostics / level calibration `pilot_high_voltage`,
+`pilot_low_voltage` (mV at the ADC input).
+
+### States
+
+| State | Meaning | Pilot | Relay | Charging LED | Error LED |
+|---|---|---|---|---|---|
+| A | no vehicle | +12 V | off | off | off |
+| B1 | connected, not allowed to charge | +12 V | off | blink 500/500 ms | off |
+| B2 | connected, ready | PWM | off | blink 500/500 ms | off |
+| C1 / D1 | vehicle wants to charge, not allowed | +12 V | off after 6 s | blink 1900/100 ms | off |
+| C2 / D2 | charging | PWM | on | on | off |
+| E | error | −12 V | off | off | on |
+| F | not available | −12 V | off | off | blink 500/500 ms |
+
+Charging is allowed when the EVSE is enabled, available, authorized, no limit is reached
+and the RCM self test passed. Pilot fault, diode short and RCM errors clear after 60 s,
+temperature errors when the temperature is back to normal. The WiFi LED is on when
+connected, blinks 500/500 ms while connecting and 100/900 ms while the fallback hotspot
+is active.
+
+The `Evse` object can also be used from lambdas, e.g.
+`id(evse_controller).authorize();`, `id(evse_controller).set_charging_current(10.5);`,
+`id(evse_controller).get_state()`.
+
+### Differences from esp32-evse
+
+The state machine (`components/evse/evse_core.*`) is a line by line port of
+`evse.c`, it is unit tested on the host with the esp32-evse tests and more
+(`tests/host`). Deliberate differences:
+
+* After all errors clear, the state machine restarts from state A. esp32-evse resumed the
+  state before the error when a temperature error cleared, e.g. switching the relay on in
+  C2 without checking the pilot, the authorization or the session.
+* The RCM self test does not block the main loop; charging waits until it passes.
+* Lowering the maximum charging current also lowers the charging current and the default
+  charging current.
+* The charging current resolution of the PWM is 0.1 A (esp32-evse truncated to 1 A).
+* Out of range charging currents are limited instead of rejected.
+* The authorization source is level and edge sensitive (see `authorization`).
+* Without an energy meter the consumption and under power limits are ignored.
+* `enable` / `available` are restored after reboot by default.
+* The energy meter measures every second (esp32-evse: every 50 ms) and integrates the
+  energy with the trapezoidal rule, so the main loop is blocked much less.
+
+## `evse_energy_meter` component
+
+```yaml
+evse_energy_meter:
+  id: energy_meter
+  three_phase: true
+  current:
+    sensors: [adc_current_l1, adc_current_l2, adc_current_l3]
+    scale: 0.090909091
+  voltage:
+    sensors: [adc_voltage_l1, adc_voltage_l2, adc_voltage_l3]
+    scale: 0.47
+```
+
+Single phase installation: list only the L1 inputs (a single id without the brackets
+works too) and leave out the L2 / L3 `adc` sensors and the `*_l2` / `*_l3` meter sensors.
+With `three_phase: false` only L1 is measured, extra inputs are ignored (with a warning).
+
+```yaml
+evse_energy_meter:
+  id: energy_meter
+  three_phase: false
+  current:
+    sensors: [adc_current_l1]
+    scale: 0.090909091
+  voltage:
+    sensors: [adc_voltage_l1]
+    scale: 0.47
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `three_phase` | `false` | Three phase installation. With a single current / voltage input its value is used for all phases. |
+| `current.sensors` | – | 1 or 3 `adc` sensors (L1, L2, L3), `attenuation: 12db`, `update_interval: never`. Without current inputs the current is estimated from the charging current (esp32-evse "dummy" mode). |
+| `current.scale` | required | A per mV RMS at the ADC input, the same value as in esp32-evse `board.yaml`. |
+| `voltage.sensors` | – | 1 or 3 `adc` sensors. Without voltage inputs `ac_voltage` is used. |
+| `voltage.scale` | required | V per mV RMS at the ADC input, the same value as in esp32-evse `board.yaml`. |
+| `ac_voltage` | `230V` | Voltage used when it is not measured. |
+| `sample_duration` | `40ms` | RMS window, a whole number of mains periods: 40 ms at 50 Hz, 33 ms or 50 ms at 60 Hz. |
+| `update_interval` | `1s` | Measurement interval while charging. |
+
+The meter measures only while charging (relay closed), otherwise voltage, current and
+power are 0, like in esp32-evse. Power is the apparent power, the sum of Vrms × Irms.
+Each measurement samples the inputs in a tight loop for `sample_duration` (blocking, like
+esp32-evse) and removes the DC offset; the energy is integrated with the trapezoidal rule
+between the measurements.
+The total energy is persistent (written to flash at most once per
+[`flash_write_interval`](https://esphome.io/components/preferences/)).
+
+**Sensors** (`platform: evse_energy_meter`): `voltage_l1`, `voltage_l2`, `voltage_l3` (V),
+`current_l1`, `current_l2`, `current_l3` (A), `power` (W), `total_energy` (Wh).
+
+**Button** (`platform: evse_energy_meter`): `reset_total_energy`.
+
+## Development
+
+Host unit tests of the state machine (g++ with sanitizers), including the tests of
+esp32-evse:
+
+```bash
+tests/host/run.sh
+```
+
+End to end simulation: the complete ESPHome firmware (both components, lights,
+numbers, switches, sensors) runs on the ESPHome `host` platform with a simulated
+vehicle and 3 phase ADC signals ([`tests/sim`](tests/sim)). The scenario connects,
+authorizes, charges at 32 A and 10 A, disables charging (the vehicle ignores it, the
+relay opens after 6 s), charges again, disconnects and overheats; the log is checked:
+
+```bash
+tests/sim/run.sh
+```
+
+Validate / build the example with local components (copy
+[`secrets.example.yaml`](secrets.example.yaml) to `secrets.yaml` first):
+
+```bash
+sed 's|- source: github://nagyrobi/esp32evse-esphome-fw@main|- source: {type: local, path: components}|' esp32s2da.yaml > test.yaml
+esphome compile test.yaml
+```
+
+CI runs the unit tests and builds the example with the stable and the dev
+ESPHome release, weekly as well, to catch breaking ESPHome changes early.
+
+## Safety
+
+This firmware controls mains voltage. The ESPHome configuration is part of the safety
+of the charger: keep the relay switch internal and `ALWAYS_OFF`, check the pilot levels
+with the diagnostic sensors, test the RCM and verify the state machine with an EV
+simulator before charging a vehicle. Use at your own risk.
+
+## License
+
+GPL-3.0, see [LICENSE](LICENSE). The state machine, pilot, RCM, LED and energy meter
+logic is ported from [esp32-evse](https://github.com/dzurikmiroslav/esp32-evse),
+which is licensed under GPL-3.0.
