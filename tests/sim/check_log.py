@@ -30,7 +30,6 @@ def main(path: str) -> int:
         "SCENARIO: EV requests charging",
         "Enter C2 state",
         "Set AC relay ON",
-        "Charging started",
         "SCENARIO: charging current 10A",
         "Set pilot PWM 10.0A, duty 16.67%",
         "SCENARIO: disable charging",

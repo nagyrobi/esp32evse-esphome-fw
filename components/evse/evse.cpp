@@ -335,8 +335,9 @@ void Evse::dump_config() {
                 this->pilot_levels_[0], this->pilot_levels_[1], this->pilot_levels_[2], this->pilot_levels_[3],
                 this->pilot_levels_[4], YESNO(this->core_.is_rcm()), YESNO(auth), this->auth_timeout_ / 1000,
                 (unsigned) this->temperature_sensors_.size(), this->core_.get_temp_threshold(),
-                YESNO(this->energy_meter_is_available()), this->core_.get_max_charging_current(),
-                this->get_charging_current(), PILOT_SAMPLES, this->pilot_measure_time_);
+                this->meter_phases_ == 0 ? "no" : (this->meter_phases_ == 1 ? "single phase" : "three phase"),
+                this->core_.get_max_charging_current(), this->get_charging_current(), PILOT_SAMPLES,
+                this->pilot_measure_time_);
   if (this->core_.is_rcm()) {
     LOG_PIN("  RCM Pin: ", this->rcm_pin_);
     LOG_PIN("  RCM Test Pin: ", this->rcm_test_pin_);
@@ -549,12 +550,26 @@ void Evse::publish_session_() {
 #endif
 }
 
-float Evse::get_session_energy_() const {
-#ifdef USE_EVSE_ENERGY_METER
-  if (this->energy_meter_ != nullptr)
-    return this->session_energy_;
+float Evse::get_session_energy_() const { return this->meter_phases_ > 0 ? this->session_energy_ : NAN; }
+
+bool Evse::meter_power_(float *power) const {
+#ifdef USE_SENSOR
+  if (this->meter_phases_ == 0)
+    return false;
+  float sum = 0.0f;
+  for (uint8_t i = 0; i < this->meter_phases_; i++) {
+    const sensor::Sensor *current = this->meter_currents_[i];
+    const sensor::Sensor *voltage = this->meter_voltages_[i];
+    if (current == nullptr || voltage == nullptr || !current->has_state() || !voltage->has_state() ||
+        std::isnan(current->state) || std::isnan(voltage->state))
+      return false;
+    sum += current->state * voltage->state;
+  }
+  *power = sum;
+  return true;
+#else
+  return false;
 #endif
-  return NAN;
 }
 
 uint32_t Evse::get_session_time_() {
@@ -784,13 +799,7 @@ bool Evse::auth_is_active() {
   return false;
 }
 
-bool Evse::energy_meter_is_available() {
-#ifdef USE_EVSE_ENERGY_METER
-  return this->energy_meter_ != nullptr;
-#else
-  return false;
-#endif
-}
+bool Evse::energy_meter_is_available() { return this->meter_phases_ > 0; }
 
 void Evse::energy_meter_start_session() {
   if (this->has_session_)
@@ -800,10 +809,6 @@ void Evse::energy_meter_start_session() {
   this->session_start_ = this->now_ms();
   this->charging_time_ = 0;
   this->session_energy_ = 0.0;
-#ifdef USE_EVSE_ENERGY_METER
-  if (this->energy_meter_ != nullptr)
-    this->last_total_energy_ = this->energy_meter_->get_total_energy();
-#endif
 }
 
 void Evse::energy_meter_stop_session() {
@@ -817,21 +822,19 @@ void Evse::energy_meter_stop_session() {
   this->session_energy_ = 0.0;
 }
 
-void Evse::energy_meter_process(bool charging, uint16_t charging_current_x10) {
+void Evse::energy_meter_process(bool charging, uint16_t /*charging_current_x10*/) {
   uint64_t now = this->now_ms();
-  if (charging && this->last_process_time_ != 0)
-    this->charging_time_ += now - this->last_process_time_;
+  uint64_t delta = this->last_process_time_ != 0 ? now - this->last_process_time_ : 0;
   this->last_process_time_ = now;
 
-#ifdef USE_EVSE_ENERGY_METER
-  if (this->energy_meter_ != nullptr) {
-    this->energy_meter_->set_charging(charging, charging_current_x10 / 10.0f);
-    double total = this->energy_meter_->get_total_energy();
-    if (this->has_session_ && total > this->last_total_energy_)
-      this->session_energy_ += total - this->last_total_energy_;
-    this->last_total_energy_ = total;
-  }
-#endif
+  if (charging)
+    this->charging_time_ += delta;
+
+  // Session energy from the meter values, only while the relay is closed: with an open relay
+  // no current flows, whatever the (noisy) meter shows.
+  float power;
+  if (this->has_session_ && this->relay_state_ && this->meter_power_(&power) && power > 0.0f)
+    this->session_energy_ += static_cast<double>(power) * delta / 3600000.0;
 }
 
 uint32_t Evse::energy_meter_get_consumption() { return static_cast<uint32_t>(this->session_energy_); }
@@ -839,11 +842,12 @@ uint32_t Evse::energy_meter_get_consumption() { return static_cast<uint32_t>(thi
 uint32_t Evse::energy_meter_get_charging_time() { return static_cast<uint32_t>(this->charging_time_ / 1000); }
 
 uint32_t Evse::energy_meter_get_power() {
-#ifdef USE_EVSE_ENERGY_METER
-  if (this->energy_meter_ != nullptr)
-    return static_cast<uint32_t>(std::max(lroundf(this->energy_meter_->get_power()), 0L));
-#endif
-  return 0;
+  if (!this->relay_state_)
+    return 0;  // no current flows with an open relay
+  float power;
+  if (!this->meter_power_(&power))
+    return UINT32_MAX;  // unknown, the under power limit is not reached
+  return static_cast<uint32_t>(std::max(lroundf(power), 0L));
 }
 
 #ifdef USE_SENSOR

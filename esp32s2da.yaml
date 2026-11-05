@@ -71,7 +71,15 @@ evse:
   charging_led: led_charging
   error_led: led_error
   wifi_led: led_wifi
-  energy_meter: energy_meter
+  # Current (A) and voltage (V) sensors of the energy meter: the evse_energy_meter below
+  # or any other meter (e.g. sdm_meter). Single phase: only current_l1 and voltage_l1.
+  energy_meter:
+    current_l1: current_l1
+    current_l2: current_l2
+    current_l3: current_l3
+    voltage_l1: voltage_l1
+    voltage_l2: voltage_l2
+    voltage_l3: voltage_l3
   temperature_sensors: [evse_temperature]
   # Authorization (RFID, key switch, Home Assistant...). Only when configured, a
   # binary_sensor or a switch: while it is on, or for authorization_timeout after
@@ -89,22 +97,52 @@ evse:
 
 evse_energy_meter:
   id: energy_meter
-  # Three phase installation. On a single phase installation list only the L1 inputs
-  # (and remove the L2/L3 adc sensors and the *_l2 / *_l3 meter sensors below):
-  #   three_phase: false
-  #   current:
-  #     sensors: [adc_current_l1]
-  #     scale: 0.090909091
-  #   voltage:
-  #     sensors: [adc_voltage_l1]
-  #     scale: 0.47
-  three_phase: true
-  current:
-    sensors: [adc_current_l1, adc_current_l2, adc_current_l3]
-    scale: 0.090909091
-  voltage:
-    sensors: [adc_voltage_l1, adc_voltage_l2, adc_voltage_l3]
-    scale: 0.47
+  # Three phase: current_l1..l3 and voltage_l1..l3. Single phase: only current_l1 and
+  # voltage_l1 (remove the others here, in evse: energy_meter: and the L2 / L3 adc sensors).
+  # The raw value of the current / voltage sensors is the RMS voltage at the ADC input in
+  # mV, the multiply filter is the scale of the esp32-evse board.yaml.
+  current_l1:
+    id: current_l1
+    name: Current L1
+    adc_sensor: adc_current_l1
+    filters:
+      - multiply: 0.090909091
+  current_l2:
+    id: current_l2
+    name: Current L2
+    adc_sensor: adc_current_l2
+    filters:
+      - multiply: 0.090909091
+  current_l3:
+    id: current_l3
+    name: Current L3
+    adc_sensor: adc_current_l3
+    filters:
+      - multiply: 0.090909091
+  voltage_l1:
+    id: voltage_l1
+    name: Voltage L1
+    adc_sensor: adc_voltage_l1
+    filters:
+      - multiply: 0.47
+  voltage_l2:
+    id: voltage_l2
+    name: Voltage L2
+    adc_sensor: adc_voltage_l2
+    filters:
+      - multiply: 0.47
+  voltage_l3:
+    id: voltage_l3
+    name: Voltage L3
+    adc_sensor: adc_voltage_l3
+    filters:
+      - multiply: 0.47
+  total_power:
+    name: Power
+  total_energy:
+    name: Total energy
+  # currents only while the relay is on, so the noise of the current inputs is not counted
+  relay: ac_relay
   sample_duration: 40ms  # 2 periods at 50Hz, use 33ms or 50ms at 60Hz
   update_interval: 1s
 
@@ -263,24 +301,6 @@ sensor:
     pilot_low_voltage:
       name: Pilot low voltage
       disabled_by_default: true
-
-  - platform: evse_energy_meter
-    voltage_l1:
-      name: Voltage L1
-    voltage_l2:
-      name: Voltage L2
-    voltage_l3:
-      name: Voltage L3
-    current_l1:
-      name: Current L1
-    current_l2:
-      name: Current L2
-    current_l3:
-      name: Current L3
-    power:
-      name: Power
-    total_energy:
-      name: Total energy
 
 binary_sensor:
   # aux inputs

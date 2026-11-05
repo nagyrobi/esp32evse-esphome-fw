@@ -124,7 +124,7 @@ class EvseHal {
   virtual uint32_t energy_meter_get_consumption() { return 0; }
   /// Session charging time in s
   virtual uint32_t energy_meter_get_charging_time() { return 0; }
-  /// Actual power in W
+  /// Actual power in W, UINT32_MAX when unknown (the under power limit is then not reached)
   virtual uint32_t energy_meter_get_power() { return 0; }
 };
 
