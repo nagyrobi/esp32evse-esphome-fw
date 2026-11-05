@@ -40,7 +40,7 @@ logger:
 
 api:
   encryption:
-    key: !secret api_encryption_key
+    key: !secret encryption_key
 
 ota:
   - platform: esphome
@@ -49,10 +49,6 @@ ota:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
-  ap:  # fallback hotspot, the wifi LED blinks 100/900ms while it is active
-    password: !secret fallback_ap_password
-
-captive_portal:
 
 # ---------------------------------------------------------------------------
 # EVSE
@@ -93,7 +89,16 @@ evse:
 
 evse_energy_meter:
   id: energy_meter
-  three_phase: true  # set to false on a single phase installation
+  # Three phase installation. On a single phase installation list only the L1 inputs
+  # (and remove the L2/L3 adc sensors and the *_l2 / *_l3 meter sensors below):
+  #   three_phase: false
+  #   current:
+  #     sensors: [adc_current_l1]
+  #     scale: 0.090909091
+  #   voltage:
+  #     sensors: [adc_voltage_l1]
+  #     scale: 0.47
+  three_phase: true
   current:
     sensors: [adc_current_l1, adc_current_l2, adc_current_l3]
     scale: 0.090909091

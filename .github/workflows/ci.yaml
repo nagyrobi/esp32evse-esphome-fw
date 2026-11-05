@@ -61,8 +61,7 @@ jobs:
           cat > secrets.yaml <<'EOF'
           wifi_ssid: "ci"
           wifi_password: "ci-password"
-          fallback_ap_password: "ci-password"
-          api_encryption_key: "ZmFrZWtleWZha2VrZXlmYWtla2V5ZmFrZWtleTEyMzQ="
+          encryption_key: "ZmFrZWtleWZha2VrZXlmYWtla2V5ZmFrZWtleTEyMzQ="
           EOF
       - name: Validate
         run: esphome config test-esp32s2da.yaml

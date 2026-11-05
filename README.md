@@ -201,6 +201,22 @@ evse_energy_meter:
     scale: 0.47
 ```
 
+Single phase installation: list only the L1 inputs (a single id without the brackets
+works too) and leave out the L2 / L3 `adc` sensors and the `*_l2` / `*_l3` meter sensors.
+With `three_phase: false` only L1 is measured, extra inputs are ignored (with a warning).
+
+```yaml
+evse_energy_meter:
+  id: energy_meter
+  three_phase: false
+  current:
+    sensors: [adc_current_l1]
+    scale: 0.090909091
+  voltage:
+    sensors: [adc_voltage_l1]
+    scale: 0.47
+```
+
 | Option | Default | Description |
 |---|---|---|
 | `three_phase` | `false` | Three phase installation. With a single current / voltage input its value is used for all phases. |

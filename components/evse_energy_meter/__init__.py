@@ -43,6 +43,19 @@ INPUTS_SCHEMA = cv.Schema(
     }
 )
 
+
+def _validate_phases(config):
+    if not config[CONF_THREE_PHASE]:
+        for key in (CONF_CURRENT, CONF_VOLTAGE):
+            if key in config and len(config[key][CONF_SENSORS]) > 1:
+                _LOGGER.warning(
+                    "evse_energy_meter: three_phase is false, only the first %s input "
+                    "(L1) is used, the L2 / L3 inputs are ignored",
+                    key,
+                )
+    return config
+
+
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(EvseEnergyMeter),
@@ -60,6 +73,7 @@ CONFIG_SCHEMA = cv.Schema(
         ),
     }
 ).extend(cv.polling_component_schema("1s"))
+CONFIG_SCHEMA = cv.All(CONFIG_SCHEMA, _validate_phases)
 
 
 def _validate_adc_inputs(config):
