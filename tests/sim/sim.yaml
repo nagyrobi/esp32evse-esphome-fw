@@ -1,0 +1,205 @@
+# Runs the EVSE components on the ESPHome host platform with a simulated vehicle.
+#
+#   cd tests/sim && esphome run sim.yaml --no-logs && .esphome/build/evse-sim/.pioenvs/evse-sim/program
+#
+# or tests/sim/run.sh, which runs the scenario below and checks the log.
+
+esphome:
+  name: evse-sim
+  on_boot:
+    priority: -100
+    then:
+      - script.execute: scenario
+
+host:
+
+logger:
+  level: DEBUG
+
+external_components:
+  - source:
+      type: local
+      path: ../../components
+  - source:
+      type: local
+      path: components
+
+globals:
+  - id: temperature
+    type: float
+    initial_value: "30.0"
+
+script:
+  - id: scenario
+    then:
+      - delay: 3s
+      - logger.log: "SCENARIO: EV connects"
+      - lambda: id(ev).set_ev_state('B');
+      - delay: 2s
+      - logger.log: "SCENARIO: authorize"
+      - switch.turn_on: authorized
+      - delay: 1s
+      - logger.log: "SCENARIO: EV requests charging"
+      - lambda: id(ev).set_ev_state('C');
+      - delay: 6s
+      - logger.log: "SCENARIO: charging current 10A"
+      - number.set:
+          id: charging_current
+          value: 10
+      - delay: 4s
+      - logger.log: "SCENARIO: disable charging, the EV does not react"
+      - switch.turn_off: charging_enabled
+      - delay: 8s
+      - logger.log: "SCENARIO: enable charging"
+      - switch.turn_on: charging_enabled
+      - delay: 6s
+      - logger.log: "SCENARIO: EV stops charging"
+      - lambda: id(ev).set_ev_state('B');
+      - delay: 3s
+      - logger.log: "SCENARIO: EV disconnects"
+      - lambda: id(ev).set_ev_state('A');
+      - switch.turn_off: authorized
+      - delay: 3s
+      - logger.log: "SCENARIO: temperature high"
+      - globals.set:
+          id: temperature
+          value: "70.0"
+      - delay: 4s
+      - logger.log: "SCENARIO: temperature normal"
+      - globals.set:
+          id: temperature
+          value: "30.0"
+      - delay: 3s
+      - logger.log: "SCENARIO: END"
+
+ev_simulator:
+  id: ev
+  relay: ac_relay
+  pilot_output_id: pilot_pwm
+  pilot_sensor_id: pilot_adc
+  current_ids: [adc_current_l1, adc_current_l2, adc_current_l3]
+  voltage_ids: [adc_voltage_l1, adc_voltage_l2, adc_voltage_l3]
+
+evse:
+  id: evse_controller
+  pilot:
+    output: pilot_pwm
+    sensor: pilot_adc
+    levels: [2405, 2099, 1792, 1484, 728]
+  relay: ac_relay
+  charging_led: led_charging
+  error_led: led_error
+  authorization: authorized
+  energy_meter: energy_meter
+  temperature_sensors: [evse_temperature]
+  update_interval: 2s
+
+evse_energy_meter:
+  id: energy_meter
+  three_phase: true
+  current:
+    sensors: [adc_current_l1, adc_current_l2, adc_current_l3]
+    scale: 0.090909091
+  voltage:
+    sensors: [adc_voltage_l1, adc_voltage_l2, adc_voltage_l3]
+    scale: 0.47
+  update_interval: 1s
+
+output:
+  - platform: template
+    id: led_charging_output
+    type: binary
+    write_action:
+      - logger.log:
+          format: "LED charging %s"
+          args: ['state ? "ON" : "off"']
+  - platform: template
+    id: led_error_output
+    type: binary
+    write_action:
+      - logger.log:
+          format: "LED error %s"
+          args: ['state ? "ON" : "off"']
+
+light:
+  - platform: binary
+    id: led_charging
+    output: led_charging_output
+    restore_mode: ALWAYS_OFF
+  - platform: binary
+    id: led_error
+    output: led_error_output
+    restore_mode: ALWAYS_OFF
+
+switch:
+  - platform: template
+    id: ac_relay
+    name: AC relay
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+  - platform: template
+    id: authorized
+    name: Authorized
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+  - platform: evse
+    enable:
+      id: charging_enabled
+      name: Charging enabled
+      restore_mode: ALWAYS_ON
+    available:
+      name: Available
+      restore_mode: ALWAYS_ON
+
+sensor:
+  - platform: template
+    id: evse_temperature
+    name: Temperature
+    lambda: return id(temperature);
+    update_interval: 1s
+  - platform: evse
+    session_energy:
+      name: Session energy
+    session_time:
+      name: Session time
+    charging_time:
+      name: Charging time
+  - platform: evse_energy_meter
+    voltage_l1:
+      name: Voltage L1
+    current_l1:
+      name: Current L1
+    power:
+      name: Power
+    total_energy:
+      name: Total energy
+
+binary_sensor:
+  - platform: evse
+    error:
+      name: Error
+    temperature_high:
+      name: Temperature high
+    limit_reached:
+      name: Limit reached
+    pending_authorization:
+      name: Pending authorization
+    vehicle_connected:
+      name: Vehicle connected
+    charging:
+      name: Charging
+
+text_sensor:
+  - platform: evse
+    state:
+      name: State
+    errors:
+      name: Errors
+
+number:
+  - platform: evse
+    charging_current:
+      id: charging_current
+      name: Charging current
+    maximum_charging_current:
+      name: Maximum charging current

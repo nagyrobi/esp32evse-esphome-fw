@@ -1,0 +1,367 @@
+# ESPHome configuration of the ESP32-S2-DA EVSE board
+# (board-config/esp32s2da.yaml of https://github.com/dzurikmiroslav/esp32-evse)
+#
+# Mapping of the esp32-evse board.yaml:
+#   ADC1 channel N of the ESP32-S2 is GPIO(N+1):
+#     pilot adcChannel 3          -> GPIO4
+#     energy meter current 4,5,6  -> GPIO5, GPIO6, GPIO7
+#     energy meter voltage 7,8,9  -> GPIO8, GPIO9, GPIO10
+#     analog input IN3 channel 0  -> GPIO1
+#
+# Not ported: socket lock, proximity (tethered cable only), scheduler, AT commands,
+# Nextion, Lua scripts, Modbus server. Use ESPHome components for those if needed.
+
+substitutions:
+  name: evse-2
+  friendly_name: EVSE 2
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  min_version: 2026.10.0
+
+esp32:
+  variant: esp32s2
+  flash_size: 4MB
+  framework:
+    type: esp-idf
+
+external_components:
+  - source: github://nagyrobi/esp32evse-esphome-fw@main
+    components: [evse, evse_energy_meter]
+  # for local development:
+  # - source:
+  #     type: local
+  #     path: components
+
+# The S2 has two UARTs, the logger uses the native USB (USB_CDC is the default on the S2)
+logger:
+  level: DEBUG
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    encryption: {}  # uses the api encryption key
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:  # fallback hotspot, the wifi LED blinks 100/900ms while it is active
+    password: !secret fallback_ap_password
+
+captive_portal:
+
+# ---------------------------------------------------------------------------
+# EVSE
+
+evse:
+  id: evse_controller
+  pilot:
+    output: pilot_pwm
+    sensor: pilot_adc
+    # mV at the ADC: [12V, 9V, 6V, 3V, -12V] like esp32-evse board.yaml
+    levels: [2405, 2099, 1792, 1484, 728]
+  relay: ac_relay
+  rcm:
+    pin: GPIO41  # input with pull-down (default)
+    test_pin:
+      number: GPIO26
+      # GPIO26 is the PSRAM chip select of S2 modules with PSRAM; it is free on the
+      # ESP32-S2-WROOM of this board (esp32-evse uses it as the RCM test pin)
+      ignore_pin_validation_error: true
+  charging_led: led_charging
+  error_led: led_error
+  wifi_led: led_wifi
+  energy_meter: energy_meter
+  temperature_sensors: [evse_temperature]
+  # Authorization (RFID, key switch, Home Assistant...). Only when configured, a
+  # binary_sensor or a switch: while it is on, or for authorization_timeout after
+  # it turned on, a connecting vehicle is authorized.
+  # authorization: charging_authorized
+  # authorization_timeout: 60s
+  # Factory defaults of the settings, changeable with the number entities below:
+  maximum_charging_current: 32A
+  # default_charging_current: 16A
+  # default_consumption_limit: 0Wh
+  # default_charging_time_limit: 0s
+  # default_under_power_limit: 0W
+  # temperature_threshold: 60°C
+  update_interval: 5s  # session sensors
+
+evse_energy_meter:
+  id: energy_meter
+  three_phase: true  # set to false on a single phase installation
+  current:
+    sensors: [adc_current_l1, adc_current_l2, adc_current_l3]
+    scale: 0.090909091
+  voltage:
+    sensors: [adc_voltage_l1, adc_voltage_l2, adc_voltage_l3]
+    scale: 0.47
+  sample_duration: 40ms  # 2 periods at 50Hz, use 33ms or 50ms at 60Hz
+  update_interval: 1s
+
+# ---------------------------------------------------------------------------
+# Hardware
+
+output:
+  # pilot PWM, 100% = +12V, 0% = -12V
+  - platform: ledc
+    id: pilot_pwm
+    pin: GPIO33
+    frequency: 1000Hz
+  - platform: gpio
+    id: led_charging_output
+    pin: GPIO36
+  - platform: gpio
+    id: led_error_output
+    pin: GPIO37
+  - platform: gpio
+    id: led_wifi_output
+    pin: GPIO35
+
+switch:
+  # AC relay, controlled by the EVSE only (must be ALWAYS_OFF, keep it internal)
+  - platform: gpio
+    id: ac_relay
+    pin: GPIO21
+    restore_mode: ALWAYS_OFF
+
+  # aux outputs
+  - platform: gpio
+    name: OUT1
+    pin: GPIO17
+  - platform: gpio
+    name: OUT2
+    pin: GPIO16
+  - platform: gpio
+    name: OUT3
+    pin: GPIO15
+  - platform: gpio
+    name: OUT4
+    pin: GPIO14
+
+  - platform: evse
+    enable:
+      name: Charging enabled
+    available:
+      name: Available
+
+  # example authorization source, enable "authorization: charging_authorized" above
+  # - platform: template
+  #   id: charging_authorized
+  #   name: Charging authorized
+  #   optimistic: true
+  #   restore_mode: ALWAYS_OFF
+
+light:
+  - platform: binary
+    id: led_charging
+    name: Charging LED
+    output: led_charging_output
+    restore_mode: ALWAYS_OFF
+    internal: true
+  - platform: binary
+    id: led_error
+    name: Error LED
+    output: led_error_output
+    restore_mode: ALWAYS_OFF
+    internal: true
+  - platform: binary
+    id: led_wifi
+    name: WiFi LED
+    output: led_wifi_output
+    restore_mode: ALWAYS_OFF
+    internal: true
+
+one_wire:
+  - platform: gpio
+    pin: GPIO42
+
+uart:
+  - id: uart_ext
+    rx_pin: GPIO12
+    tx_pin: GPIO13
+    baud_rate: 115200
+  - id: uart_rs485
+    rx_pin: GPIO40
+    tx_pin: GPIO38
+    baud_rate: 9600
+
+# RS-485 driver enable is GPIO39, e.g. for a Modbus meter:
+# modbus:
+#   uart_id: uart_rs485
+#   flow_control_pin: GPIO39
+
+sensor:
+  # ADC inputs used by the EVSE (no name: internal, sampled by the EVSE components)
+  - platform: adc
+    id: pilot_adc
+    pin: GPIO4
+    attenuation: 12db
+    update_interval: never
+  - platform: adc
+    id: adc_current_l1
+    pin: GPIO5
+    attenuation: 12db
+    update_interval: never
+  - platform: adc
+    id: adc_current_l2
+    pin: GPIO6
+    attenuation: 12db
+    update_interval: never
+  - platform: adc
+    id: adc_current_l3
+    pin: GPIO7
+    attenuation: 12db
+    update_interval: never
+  - platform: adc
+    id: adc_voltage_l1
+    pin: GPIO8
+    attenuation: 12db
+    update_interval: never
+  - platform: adc
+    id: adc_voltage_l2
+    pin: GPIO9
+    attenuation: 12db
+    update_interval: never
+  - platform: adc
+    id: adc_voltage_l3
+    pin: GPIO10
+    attenuation: 12db
+    update_interval: never
+
+  # aux analog input
+  - platform: adc
+    name: IN3
+    pin: GPIO1
+    attenuation: 12db
+    update_interval: 10s
+
+  - platform: dallas_temp
+    id: evse_temperature
+    name: Temperature
+    update_interval: 10s
+
+  - platform: evse
+    session_energy:
+      name: Session energy
+    session_time:
+      name: Session time
+    charging_time:
+      name: Charging time
+    pilot_high_voltage:
+      name: Pilot high voltage
+      disabled_by_default: true
+    pilot_low_voltage:
+      name: Pilot low voltage
+      disabled_by_default: true
+
+  - platform: evse_energy_meter
+    voltage_l1:
+      name: Voltage L1
+    voltage_l2:
+      name: Voltage L2
+    voltage_l3:
+      name: Voltage L3
+    current_l1:
+      name: Current L1
+    current_l2:
+      name: Current L2
+    current_l3:
+      name: Current L3
+    power:
+      name: Power
+    total_energy:
+      name: Total energy
+
+binary_sensor:
+  # aux inputs
+  - platform: gpio
+    name: IN1
+    pin: GPIO11
+  - platform: gpio
+    name: IN2
+    pin: GPIO2
+
+  # boot button: hold for 10s to erase all settings (like esp32-evse)
+  - platform: gpio
+    id: boot_button
+    pin:
+      number: GPIO0
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+      ignore_strapping_warning: true
+    on_multi_click:
+      - timing:
+          - ON for at least 10s
+        then:
+          - button.press: factory_reset_button
+
+  - platform: evse
+    pilot_fault:
+      name: Pilot fault
+    diode_short:
+      name: Diode short
+    rcm_triggered:
+      name: RCM triggered
+    rcm_selftest_fault:
+      name: RCM self test fault
+    temperature_high:
+      name: Temperature high
+    temperature_fault:
+      name: Temperature fault
+    error:
+      name: Error
+    limit_reached:
+      name: Limit reached
+    pending_authorization:
+      name: Pending authorization
+    vehicle_connected:
+      name: Vehicle connected
+    charging:
+      name: Charging
+
+text_sensor:
+  - platform: evse
+    state:
+      name: State
+    errors:
+      name: Errors
+
+number:
+  - platform: evse
+    charging_current:
+      name: Charging current
+    default_charging_current:
+      name: Default charging current
+    maximum_charging_current:
+      name: Maximum charging current
+    consumption_limit:
+      name: Consumption limit
+    default_consumption_limit:
+      name: Default consumption limit
+    charging_time_limit:
+      name: Charging time limit
+    default_charging_time_limit:
+      name: Default charging time limit
+    under_power_limit:
+      name: Under power limit
+    default_under_power_limit:
+      name: Default under power limit
+    temperature_threshold:
+      name: Temperature threshold
+
+button:
+  - platform: factory_reset
+    id: factory_reset_button
+    name: Factory reset
+  - platform: restart
+    name: Restart
+  - platform: evse_energy_meter
+    reset_total_energy:
+      name: Reset total energy

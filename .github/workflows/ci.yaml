@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  schedule:
+    # weekly, to catch breaking changes of new ESPHome releases
+    - cron: "17 4 * * 1"
+
+jobs:
+  host-tests:
+    name: State machine unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run
+        run: VERBOSE=1 tests/host/run.sh
+
+  simulation:
+    name: Simulation on the host platform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install ESPHome
+        run: pip install esphome
+      - name: Run the scenario
+        run: tests/sim/run.sh
+
+  esphome:
+    name: ESPHome ${{ matrix.esphome }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        esphome: [stable, dev]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install ESPHome
+        run: |
+          if [ "${{ matrix.esphome }}" = "dev" ]; then
+            pip install "esphome @ git+https://github.com/esphome/esphome.git@dev"
+          else
+            pip install esphome
+          fi
+          esphome version
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/esphome
+          key: esphome-${{ matrix.esphome }}-${{ hashFiles('esp32s2da.yaml') }}
+          restore-keys: esphome-${{ matrix.esphome }}-
+      - name: Prepare test configuration
+        run: |
+          sed 's|- source: github://nagyrobi/esp32evse-esphome-fw@main|- source: {type: local, path: components}|' \
+            esp32s2da.yaml > test-esp32s2da.yaml
+          cat > secrets.yaml <<'EOF'
+          wifi_ssid: "ci"
+          wifi_password: "ci-password"
+          fallback_ap_password: "ci-password"
+          api_encryption_key: "ZmFrZWtleWZha2VrZXlmYWtla2V5ZmFrZWtleTEyMzQ="
+          EOF
+      - name: Validate
+        run: esphome config test-esp32s2da.yaml
+      - name: Compile
+        run: esphome compile test-esp32s2da.yaml
