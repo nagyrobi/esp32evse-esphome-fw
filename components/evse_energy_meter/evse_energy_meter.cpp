@@ -220,9 +220,13 @@ void EvseEnergyMeter::save_total_energy_() {
   }
 }
 
-void EvseEnergyMeter::reset_total_energy() {
-  ESP_LOGI(TAG, "Reset total energy");
-  this->total_energy_ = 0.0;
+void EvseEnergyMeter::set_total_energy(double total_energy) {
+  if (!std::isfinite(total_energy) || total_energy < 0.0) {
+    ESP_LOGW(TAG, "Invalid total energy %f", total_energy);
+    return;
+  }
+  ESP_LOGI(TAG, "Set total energy %.0fWh", total_energy);
+  this->total_energy_ = total_energy;
   this->save_total_energy_();
   this->publish_totals_();
 }

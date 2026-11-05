@@ -361,6 +361,29 @@ phase meter, other combinations are rejected.
 
 **Button** (`platform: evse_energy_meter`): `reset_total_energy`.
 
+**Continuing the esp32-evse counter:** `set_total_energy()` sets the total energy in Wh
+(persistent). To set it once when migrating, e.g. to the total consumption (Wh) shown by
+esp32-evse, a flag in flash makes sure the lambda runs only on the first boot (a factory
+reset erases both):
+
+```yaml
+esphome:
+  on_boot:
+    priority: -100  # after the energy meter restored its value
+    then:
+      - lambda: |-
+          if (!id(total_energy_imported)) {
+            id(energy_meter).set_total_energy(1234567);  // Wh
+            id(total_energy_imported) = true;
+          }
+
+globals:
+  - id: total_energy_imported
+    type: bool
+    restore_value: true
+    initial_value: "false"
+```
+
 ## Development
 
 Host unit tests of the state machine (g++ with sanitizers), including the tests of

@@ -56,8 +56,10 @@ class EvseEnergyMeter : public PollingComponent {
   float get_total_power() const { return this->power_valid_ ? this->power_ : NAN; }
   /// Total energy in Wh, persistent
   double get_total_energy() const { return this->total_energy_; }
+  /// Set the total energy in Wh (persistent), e.g. to continue the counter of esp32-evse
+  void set_total_energy(double total_energy);
   /// Set the total energy to 0
-  void reset_total_energy();
+  void reset_total_energy() { this->set_total_energy(0.0); }
 
  protected:
   struct Channel {
