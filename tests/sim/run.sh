@@ -7,6 +7,6 @@ cd "$(dirname "$0")"
 LOG="${TMPDIR:-/tmp}/evse-sim.log"
 
 esphome compile sim.yaml
-# the scenario takes ~45s
-timeout 50 stdbuf -oL -eL .esphome/build/evse-sim/.pioenvs/evse-sim/program > "$LOG" 2>&1 || true
+# the scenario takes ~52s
+timeout 60 stdbuf -oL -eL .esphome/build/evse-sim/.pioenvs/evse-sim/program > "$LOG" 2>&1 || true
 python3 check_log.py "$LOG"

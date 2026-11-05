@@ -362,6 +362,9 @@ number:
       name: Temperature threshold
 
 button:
+  - platform: evse
+    clear_error:
+      name: Clear error state
   - platform: factory_reset
     id: factory_reset_button
     name: Factory reset

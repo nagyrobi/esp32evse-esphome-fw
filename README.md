@@ -145,6 +145,43 @@ Default `restore_mode: RESTORE_DEFAULT_ON`, use `ALWAYS_ON` to get the esp32-evs
 `charging_time` (s), and for diagnostics / level calibration `pilot_high_voltage`,
 `pilot_low_voltage` (mV at the ADC input).
 
+**Button** (`platform: evse`): `clear_error` leaves the error state now instead of after
+60 s (pilot fault, diode short, RCM triggered, RCM self test fault). The state machine
+restarts from state A, so a fault that is still present trips again, and after an RCM
+error the RCM self test runs again before charging. Temperature errors are not cleared,
+they clear when the temperature is back to normal.
+
+### Filters
+
+The EVSE logic does not use the published states of its own sensors: the state machine,
+the limits and the session energy work with the internal, unfiltered values of `evse` and
+`evse_energy_meter`. Filters on the `platform: evse` and `platform: evse_energy_meter`
+sensors (e.g. `throttle_average`, `delta`, `multiply`) only change what is published to
+Home Assistant and automations. For example the total energy in kWh:
+
+```yaml
+    total_energy:
+      name: Total energy
+      unit_of_measurement: kWh
+      accuracy_decimals: 3
+      filters:
+        - multiply: 0.001
+```
+
+To publish less often, prefer filters (e.g. `throttle_average: 10s` for the power, voltage
+and current, `throttle: 10s` for the total energy) over a longer `update_interval` of the
+energy meter, which is also the interval of the energy integration.
+
+Inputs that the EVSE reads from other entities are different:
+
+* `temperature_sensors`: the EVSE uses the filtered value. A smoothing filter delays the
+  over temperature error, a filter that drops values may cause `temperature_fault` after
+  `temperature_timeout`.
+* `authorization`: the EVSE uses the filtered state of the binary sensor (e.g.
+  `delayed_on`).
+* The `adc` sensors of the pilot and the energy meter are sampled directly, their filters
+  are not used.
+
 ### States
 
 | State | Meaning | Pilot | Relay | Charging LED | Error LED |
@@ -158,14 +195,14 @@ Default `restore_mode: RESTORE_DEFAULT_ON`, use `ALWAYS_ON` to get the esp32-evs
 | F | not available | −12 V | off | off | blink 500/500 ms |
 
 Charging is allowed when the EVSE is enabled, available, authorized, no limit is reached
-and the RCM self test passed. Pilot fault, diode short and RCM errors clear after 60 s,
-temperature errors when the temperature is back to normal. The WiFi LED is on when
-connected, blinks 500/500 ms while connecting and 100/900 ms while the fallback hotspot
-is active.
+and the RCM self test passed. Pilot fault, diode short and RCM errors clear after 60 s
+or with the `clear_error` button, temperature errors when the temperature is back to
+normal. The WiFi LED is on when connected, blinks 500/500 ms while connecting and
+100/900 ms while the fallback hotspot (`wifi: ap:`) is active.
 
 The `Evse` object can also be used from lambdas, e.g.
-`id(evse_controller).authorize();`, `id(evse_controller).set_charging_current(10.5);`,
-`id(evse_controller).get_state()`.
+`id(evse_controller).authorize();`, `id(evse_controller).clear_error();`,
+`id(evse_controller).set_charging_current(10.5);`, `id(evse_controller).get_state()`.
 
 ### Differences from esp32-evse
 

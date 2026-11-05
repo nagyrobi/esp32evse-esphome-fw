@@ -70,6 +70,18 @@ script:
           id: temperature
           value: "30.0"
       - delay: 3s
+      - logger.log: "SCENARIO: pilot short circuit"
+      - lambda: id(ev).set_ev_state('X');
+      - delay: 2s
+      - logger.log: "SCENARIO: clear error, the fault is still present"
+      - button.press: clear_error
+      - delay: 2s
+      - logger.log: "SCENARIO: fault removed"
+      - lambda: id(ev).set_ev_state('A');
+      - delay: 1s
+      - logger.log: "SCENARIO: clear error"
+      - button.press: clear_error
+      - delay: 2s
       - logger.log: "SCENARIO: END"
 
 ev_simulator:
@@ -195,6 +207,12 @@ text_sensor:
       name: State
     errors:
       name: Errors
+
+button:
+  - platform: evse
+    clear_error:
+      id: clear_error
+      name: Clear error state
 
 number:
   - platform: evse

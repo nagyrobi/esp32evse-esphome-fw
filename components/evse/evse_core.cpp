@@ -485,6 +485,20 @@ void EvseCore::authorize() {
   this->under_power_timing_ = false;
 }
 
+bool EvseCore::clear_error() {
+  if ((this->error_ & ERR_AUTO_CLEAR_BITS) == 0) {
+    ESP_LOGI(TAG, "Clear error: nothing to clear%s",
+             this->error_ ? ", temperature errors clear when the temperature is back to normal" : "");
+    return false;
+  }
+  ESP_LOGI(TAG, "Clear error");
+  // same as the expiry of the error wait time in process()
+  this->error_wait_to_ = 0;
+  this->clear_error_bits_(ERR_AUTO_CLEAR_BITS);
+  this->state_ = EvseState::A;
+  return true;
+}
+
 bool EvseCore::is_pending_auth() const {
   return this->error_ == 0 && evse_state_is_session(this->state_) && !this->authorized_;
 }

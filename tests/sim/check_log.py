@@ -54,6 +54,17 @@ def main(path: str) -> int:
         "SCENARIO: temperature normal",
         "Enter A state",
         "LED error off",
+        "SCENARIO: pilot short circuit",
+        "Enter E state",
+        "SCENARIO: clear error, the fault is still present",
+        "Clear error",
+        "Enter A state",
+        "Enter E state",
+        "SCENARIO: fault removed",
+        "SCENARIO: clear error",
+        "Clear error",
+        "Enter A state",
+        "LED error off",
         "SCENARIO: END",
     ]
     position = 0
@@ -65,6 +76,19 @@ def main(path: str) -> int:
         if index is None:
             break
         position = index + 1
+
+    # recovered by the clear error button, without the 1 min auto clear
+    last_clear = max(
+        (i for i, line in enumerate(lines) if "SCENARIO: clear error" in line),
+        default=len(lines),
+    )
+    end = next(
+        (i for i, line in enumerate(lines) if "SCENARIO: END" in line), len(lines)
+    )
+    check(
+        not any("Enter E state" in line for line in lines[last_clear:end]),
+        "stays in state A after the error is cleared",
+    )
 
     # no unexpected state changes before the first connect
     first_connect = next(

@@ -167,6 +167,12 @@ class EvseCore {
   /// Authorize to start charging (valid for the auth timeout, consumed by a session)
   void authorize();
   bool is_pending_auth() const;
+
+  /// Clear the pilot fault, diode short and RCM errors now, without waiting ERROR_WAIT_TIME.
+  /// The state machine restarts from state A, so an error that is still present is detected
+  /// again. Temperature errors are not affected, they clear when the temperature is normal.
+  /// Returns false when there was no such error.
+  bool clear_error();
   bool is_authorized() const { return this->authorized_; }
 
   bool is_limit_reached() const { return this->reached_limit_ != 0; }

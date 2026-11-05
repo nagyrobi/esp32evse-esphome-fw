@@ -43,6 +43,10 @@ void EvseNumber::control(float value) { this->parent_->on_number_control(this->t
 
 void EvseSwitch::write_state(bool state) { this->parent_->on_switch_control(this->type_, state); }
 
+#ifdef USE_BUTTON
+void ClearErrorButton::press_action() { this->parent_->clear_error(); }
+#endif
+
 // ---------------------------------------------------------------------------
 // Residual current monitor
 
