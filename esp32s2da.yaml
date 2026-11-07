@@ -49,11 +49,6 @@ ota:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
-  # optional, to light the WiFi LED (status_led) while connected:
-  # on_connect:
-  #   - light.turn_on: led_wifi
-  # on_disconnect:
-  #   - light.turn_off: led_wifi
 
 # ---------------------------------------------------------------------------
 # EVSE
@@ -207,11 +202,14 @@ light:
     name: Error LED
     pin: GPIO37
     internal: true
-  # ESPHome status LED: blinks while WiFi / Home Assistant are not connected and on errors
+  # ESPHome status LED, inverted: on while WiFi and Home Assistant are connected (like
+  # esp32-evse), off for 250 ms every 1.5 s while not connected, blinks fast on errors
   - platform: status_led
     id: led_wifi
     name: WiFi LED
-    pin: GPIO35
+    pin:
+      number: GPIO35
+      inverted: true
     internal: true
 
 one_wire:

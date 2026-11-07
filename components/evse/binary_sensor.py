@@ -59,8 +59,7 @@ BINARY_SENSORS = {
     # any error (state E)
     "error": (
         EvseBinarySensorType.BINARY_SENSOR_ERROR,
-        DEVICE_CLASS_PROBLEM,
-        cv.UNDEFINED,
+        *_FAULT,
         cv.UNDEFINED,
     ),
     # consumption, charging time or under power limit reached

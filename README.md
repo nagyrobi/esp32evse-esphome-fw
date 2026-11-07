@@ -57,7 +57,7 @@ On the ESP32-S2 the ADC1 channel *N* is `GPIO(N+1)`.
 | `acRelay.gpios: [21]` | `gpio` switch `ac_relay` on GPIO21, `restore_mode: ALWAYS_OFF` |
 | `rcm.gpio: 41`, `rcm.testGpio: 26` | `evse.rcm.pin` / `evse.rcm.test_pin` |
 | `leds.charging` / `leds.error` | `evse` lights (`type: charging` / `type: error`) on GPIO36 / GPIO37 |
-| `leds.wifi` | `status_led` light on GPIO35 |
+| `leds.wifi` | `status_led` light on GPIO35, inverted (on while connected) |
 | `energyMeter.current.adcChannels: [4, 5, 6]`, `scale` | `adc` sensors on GPIO5, 6, 7, `evse_energy_meter` `current_l1` … `current_l3` with a `multiply: <scale>` filter |
 | `energyMeter.voltage.adcChannels: [7, 8, 9]`, `scale` | `adc` sensors on GPIO8, 9, 10, `evse_energy_meter` `voltage_l1` … `voltage_l3` with a `multiply: <scale>` filter |
 | `button.gpio: 0` | `gpio` binary sensor, hold 10 s for factory reset |
@@ -133,17 +133,20 @@ temperature threshold are persistent (the YAML values above are their factory de
 | `default_under_power_limit` | W | 0–65535 | yes |
 | `temperature_threshold` | °C | 40–80 | yes |
 
-**Switches** (`platform: evse`): `enable` (allow charging) and `available` (off = state F).
-Default `restore_mode: RESTORE_DEFAULT_ON`, use `ALWAYS_ON` to get the esp32-evse behaviour
-(always enabled after boot).
+`maximum_charging_current` and `temperature_threshold` are input boxes (`mode: box`) by
+default, the others use the ESPHome default (`mode: auto`).
+
+**Switches** (`platform: evse`): `enable` (allow charging) and `available` (off = state F,
+config entity category by default). Default `restore_mode: RESTORE_DEFAULT_ON`, use
+`ALWAYS_ON` to get the esp32-evse behaviour (always enabled after boot).
 
 **Text sensors** (`platform: evse`): `state` (`A`, `B1`, `B2`, `C1`, `C2`, `D1`, `D2`,
 `E`, `F`) and `errors` (comma separated error codes or `none`).
 
 **Binary sensors** (`platform: evse`): the error codes `pilot_fault`, `diode_short`,
-`rcm_triggered`, `rcm_selftest_fault`, `temperature_high`, `temperature_fault`; and
-`error` (any error), `limit_reached`, `pending_authorization`, `vehicle_connected`
-(states B1–D2), `charging` (C2, D2).
+`rcm_triggered`, `rcm_selftest_fault`, `temperature_high`, `temperature_fault` and
+`error` (any error), in the diagnostic entity category by default; and `limit_reached`,
+`pending_authorization`, `vehicle_connected` (states B1–D2), `charging` (C2, D2).
 
 **Sensors** (`platform: evse`): `session_energy` (Wh), `session_time` (s),
 `charging_time` (s), and for diagnostics / level calibration `pilot_high_voltage`,
@@ -163,15 +166,17 @@ light:
     type: error
     id: led_error
     pin: GPIO37
-  # the WiFi LED is a plain ESPHome status LED: it blinks while WiFi / Home Assistant are
-  # not connected and on errors
+  # the WiFi LED is a plain ESPHome status LED
   - platform: status_led
     id: led_wifi
-    pin: GPIO35
+    pin:
+      number: GPIO35
+      inverted: true
 ```
 
-To light the WiFi LED while connected (like esp32-evse), add `on_connect: - light.turn_on:
-led_wifi` and `on_disconnect: - light.turn_off: led_wifi` to `wifi:`.
+With the inverted pin, the WiFi LED is on while WiFi and Home Assistant are connected
+(like esp32-evse), goes off for 250 ms every 1.5 s while they are not connected (ESPHome
+warning), and blinks fast on errors.
 
 **Button** (`platform: evse`, diagnostic entity category by default): `clear_error` leaves
 the error state now instead of after 60 s (pilot fault, diode short, RCM triggered, RCM
@@ -359,7 +364,8 @@ phase meter, other combinations are rejected.
 | `sample_duration` | `40ms` | RMS window, a whole number of mains periods: 40 ms at 50 Hz, 33 ms or 50 ms at 60 Hz. The inputs are sampled in a tight loop for this time (blocking, like esp32-evse). |
 | `update_interval` | `1s` | Measurement interval. |
 
-**Button** (`platform: evse_energy_meter`): `reset_total_energy`.
+**Button** (`platform: evse_energy_meter`): `reset_total_energy` (config entity category,
+disabled by default).
 
 **Continuing the esp32-evse counter:** `set_total_energy()` sets the total energy in Wh
 (persistent). To set it once when migrating, e.g. to the total consumption (Wh) shown by

@@ -4,6 +4,7 @@ import esphome.codegen as cg
 from esphome.components import number
 import esphome.config_validation as cv
 from esphome.const import (
+    CONF_MODE,
     DEVICE_CLASS_CURRENT,
     DEVICE_CLASS_DURATION,
     DEVICE_CLASS_ENERGY,
@@ -34,6 +35,7 @@ class NumberSpec(NamedTuple):
     device_class: str
     icon: str
     entity_category: str = cv.UNDEFINED
+    mode: str = cv.UNDEFINED  # default of the number mode (ESPHome default: AUTO)
 
 
 _CURRENT = (UNIT_AMPERE, DEVICE_CLASS_CURRENT, "mdi:current-ac")
@@ -63,6 +65,7 @@ NUMBERS = {
         1,
         *_CURRENT,
         ENTITY_CATEGORY_CONFIG,
+        mode="BOX",
     ),
     "consumption_limit": NumberSpec(
         EvseNumberType.NUMBER_CONSUMPTION_LIMIT, 0, 1000000, 1, *_ENERGY
@@ -106,22 +109,34 @@ NUMBERS = {
         DEVICE_CLASS_TEMPERATURE,
         "mdi:thermometer-alert",
         ENTITY_CATEGORY_CONFIG,
+        mode="BOX",
     ),
 }
+
+
+def _number_schema(spec):
+    schema = number.number_schema(
+        EvseNumber,
+        unit_of_measurement=spec.unit,
+        device_class=spec.device_class,
+        icon=spec.icon,
+        entity_category=spec.entity_category,
+    )
+    if spec.mode is not cv.UNDEFINED:
+        schema = schema.extend(
+            {
+                cv.Optional(CONF_MODE, default=spec.mode): cv.enum(
+                    number.NUMBER_MODES, upper=True
+                )
+            }
+        )
+    return schema
+
 
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(CONF_EVSE_ID): cv.use_id(Evse),
-        **{
-            cv.Optional(key): number.number_schema(
-                EvseNumber,
-                unit_of_measurement=spec.unit,
-                device_class=spec.device_class,
-                icon=spec.icon,
-                entity_category=spec.entity_category,
-            )
-            for key, spec in NUMBERS.items()
-        },
+        **{cv.Optional(key): _number_schema(spec) for key, spec in NUMBERS.items()},
     }
 )
 
