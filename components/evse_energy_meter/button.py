@@ -1,7 +1,7 @@
 import esphome.codegen as cg
 from esphome.components import button
 import esphome.config_validation as cv
-from esphome.const import ENTITY_CATEGORY_CONFIG
+from esphome.const import CONF_DISABLED_BY_DEFAULT, ENTITY_CATEGORY_CONFIG
 
 from . import CONF_EVSE_ENERGY_METER_ID, EvseEnergyMeter, evse_energy_meter_ns
 
@@ -16,11 +16,12 @@ ResetTotalEnergyButton = evse_energy_meter_ns.class_(
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(CONF_EVSE_ENERGY_METER_ID): cv.use_id(EvseEnergyMeter),
+        # disabled by default, so the lifetime counter is not reset by accident
         cv.Optional(CONF_RESET_TOTAL_ENERGY): button.button_schema(
             ResetTotalEnergyButton,
             entity_category=ENTITY_CATEGORY_CONFIG,
             icon="mdi:counter",
-        ),
+        ).extend({cv.Optional(CONF_DISABLED_BY_DEFAULT, default=True): cv.boolean}),
     }
 )
 
