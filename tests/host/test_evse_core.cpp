@@ -858,17 +858,186 @@ TEST(no_meter_ignores_power_limits) {
   TEST_ASSERT_FALSE(evse.is_limit_reached());
 }
 
+// Stay below the limit for more than UNDER_POWER_TIME
+static void under_power_wait(int minutes = 3) {
+  for (int i = 0; i < minutes; i++) {
+    hal.step(61000);
+    evse.process();
+  }
+}
+
+// The under power limit applies only after the power was above the limit in the session
+TEST(under_power_needs_power_above_limit) {
+  evse.set_under_power_limit(1000);
+  ev_connect_sequence();
+  ev_charge_sequence();
+
+  // below the limit from the beginning of the session: not reached
+  hal.energy_meter_mock_power = 0;
+  under_power_wait(10);
+  ASSERT_EVSE(EvseState::C2, PILOT_MOCK_STATE_PWM, true);
+  hal.energy_meter_mock_power = 999;
+  under_power_wait();
+  ASSERT_EVSE(EvseState::C2, PILOT_MOCK_STATE_PWM, true);
+
+  // the limit itself is not above the limit
+  hal.energy_meter_mock_power = 1000;
+  evse.process();
+  hal.energy_meter_mock_power = 999;
+  under_power_wait();
+  ASSERT_EVSE(EvseState::C2, PILOT_MOCK_STATE_PWM, true);
+  TEST_ASSERT_FALSE(evse.is_limit_reached());
+
+  // above the limit, then below it: reached after 1 min
+  hal.energy_meter_mock_power = 1001;
+  evse.process();
+  hal.energy_meter_mock_power = 999;
+  evse.process();  // timer starts
+  hal.step(59000);
+  evse.process();
+  ASSERT_EVSE(EvseState::C2, PILOT_MOCK_STATE_PWM, true);
+  hal.step(2000);
+  evse.process();
+  ASSERT_EVSE(EvseState::C1, PILOT_MOCK_STATE_HIGH, true);
+  TEST_ASSERT_EQUAL(LIMIT_UNDER_POWER_BIT, evse.get_reached_limit());
+}
+
+// The time under the limit starts again when charging starts. In esp32-evse it kept running
+// while the vehicle paused, so the limit was reached right after the vehicle resumed.
+TEST(under_power_time_restarts_with_charging) {
+  evse.set_under_power_limit(1000);
+  ev_connect_sequence();
+  ev_charge_sequence();
+  hal.energy_meter_mock_power = 7000;
+  evse.process();
+
+  // the vehicle reduces the power and pauses 5 s later: C2 -> B2
+  hal.energy_meter_mock_power = 0;
+  evse.process();  // timer starts
+  hal.step(5000);
+  hal.pilot_mock_up_voltage = PilotVoltage::V9;
+  evse.process();
+  ASSERT_EVSE(EvseState::B2, PILOT_MOCK_STATE_PWM, false);
+
+  // it resumes 10 min later: B2 -> C2, it has 1 min to ramp up
+  hal.step(600000);
+  evse.process();
+  hal.pilot_mock_up_voltage = PilotVoltage::V6;
+  evse.process();
+  ASSERT_EVSE(EvseState::C2, PILOT_MOCK_STATE_PWM, true);
+  evse.process();  // timer starts
+  ASSERT_EVSE(EvseState::C2, PILOT_MOCK_STATE_PWM, true);
+  TEST_ASSERT_FALSE(evse.is_limit_reached());
+  hal.step(59000);
+  evse.process();
+  ASSERT_EVSE(EvseState::C2, PILOT_MOCK_STATE_PWM, true);
+  hal.energy_meter_mock_power = 7000;
+  evse.process();
+  under_power_wait();
+  ASSERT_EVSE(EvseState::C2, PILOT_MOCK_STATE_PWM, true);
+  TEST_ASSERT_FALSE(evse.is_limit_reached());
+
+  // pause and resume again, the power stays below the limit: reached 1 min after charging started
+  hal.energy_meter_mock_power = 0;
+  hal.pilot_mock_up_voltage = PilotVoltage::V9;
+  evse.process();
+  ASSERT_EVSE(EvseState::B2, PILOT_MOCK_STATE_PWM, false);
+  hal.step(600000);
+  evse.process();
+  hal.pilot_mock_up_voltage = PilotVoltage::V6;
+  evse.process();
+  ASSERT_EVSE(EvseState::C2, PILOT_MOCK_STATE_PWM, true);
+  evse.process();  // timer starts
+  hal.step(59000);
+  evse.process();
+  ASSERT_EVSE(EvseState::C2, PILOT_MOCK_STATE_PWM, true);
+  hal.step(2000);
+  evse.process();
+  ASSERT_EVSE(EvseState::C1, PILOT_MOCK_STATE_HIGH, true);
+  TEST_ASSERT_TRUE(evse.is_limit_reached());
+}
+
+// A reached under power limit stops charging until the end of the session
+TEST(under_power_reached_until_session_end) {
+  evse.set_under_power_limit(1000);
+  ev_connect_sequence();
+  ev_charge_sequence();
+  hal.energy_meter_mock_power = 7000;
+  evse.process();
+  hal.energy_meter_mock_power = 500;
+  evse.process();  // timer starts
+  hal.step(61000);
+  evse.process();
+  ASSERT_EVSE(EvseState::C1, PILOT_MOCK_STATE_HIGH, true);
+
+  // the vehicle stops: C1 -> B1, and stays there
+  hal.energy_meter_mock_power = 0;
+  hal.pilot_mock_up_voltage = PilotVoltage::V9;
+  evse.process();
+  ASSERT_EVSE(EvseState::B1, PILOT_MOCK_STATE_HIGH, false);
+  under_power_wait();
+  ASSERT_EVSE(EvseState::B1, PILOT_MOCK_STATE_HIGH, false);
+  TEST_ASSERT_TRUE(evse.is_limit_reached());
+
+  // new session: the power has to get above the limit again
+  hal.pilot_mock_up_voltage = PilotVoltage::V12;
+  evse.process();
+  ASSERT_EVSE(EvseState::A, PILOT_MOCK_STATE_HIGH, false);
+  TEST_ASSERT_FALSE(evse.is_limit_reached());
+  ev_connect_sequence();
+  ev_charge_sequence();
+  hal.energy_meter_mock_power = 500;
+  under_power_wait();
+  ASSERT_EVSE(EvseState::C2, PILOT_MOCK_STATE_PWM, true);
+  TEST_ASSERT_FALSE(evse.is_limit_reached());
+}
+
+// The highest power of the session is compared with the actual limit
+TEST(under_power_limit_changed_in_session) {
+  // no limit yet
+  ev_connect_sequence();
+  ev_charge_sequence();
+  hal.energy_meter_mock_power = 7000;
+  evse.process();
+  hal.energy_meter_mock_power = 3000;
+  under_power_wait();
+  ASSERT_EVSE(EvseState::C2, PILOT_MOCK_STATE_PWM, true);
+
+  // limit above the highest power of the session: it does not apply
+  evse.set_under_power_limit(8000);
+  under_power_wait();
+  ASSERT_EVSE(EvseState::C2, PILOT_MOCK_STATE_PWM, true);
+  TEST_ASSERT_FALSE(evse.is_limit_reached());
+
+  // limit below it: the time starts when the limit is set
+  evse.set_under_power_limit(5000);
+  evse.process();  // timer starts
+  hal.step(59000);
+  evse.process();
+  ASSERT_EVSE(EvseState::C2, PILOT_MOCK_STATE_PWM, true);
+  hal.step(2000);
+  evse.process();
+  ASSERT_EVSE(EvseState::C1, PILOT_MOCK_STATE_HIGH, true);
+}
+
 TEST(under_power_unknown_power) {
   evse.set_under_power_limit(1000);
   ev_connect_sequence();
   ev_charge_sequence();
 
-  // the meter has no valid value
-  hal.energy_meter_mock_power = UINT32_MAX;
-  for (int i = 0; i < 3; i++) {
-    hal.step(61000);
-    evse.process();
-  }
+  // the meter has no valid value: it does not count as power above the limit
+  hal.energy_meter_mock_power = POWER_UNKNOWN;
+  under_power_wait();
+  hal.energy_meter_mock_power = 500;
+  under_power_wait();
+  ASSERT_EVSE(EvseState::C2, PILOT_MOCK_STATE_PWM, true);
+  TEST_ASSERT_FALSE(evse.is_limit_reached());
+
+  // and not as power below the limit
+  hal.energy_meter_mock_power = 7000;
+  evse.process();
+  hal.energy_meter_mock_power = POWER_UNKNOWN;
+  under_power_wait();
   ASSERT_EVSE(EvseState::C2, PILOT_MOCK_STATE_PWM, true);
   TEST_ASSERT_FALSE(evse.is_limit_reached());
 
@@ -884,6 +1053,8 @@ TEST(under_power_reset_by_authorize) {
   evse.set_under_power_limit(1000);
   ev_connect_sequence();
   ev_charge_sequence();
+  hal.energy_meter_mock_power = 7000;
+  evse.process();
 
   hal.energy_meter_mock_power = 500;
   evse.process();  // timer starts

@@ -141,6 +141,7 @@ void EvseCore::enter_new_state_(EvseState state) {
       this->authorized_ = false;
       this->reached_limit_ = 0;
       this->under_power_timing_ = false;
+      this->peak_power_ = 0;
       this->rcm_selftest_done_ = false;
       if (this->rcm_selftest_pending_) {
         this->rcm_selftest_pending_ = false;
@@ -219,7 +220,16 @@ void EvseCore::check_charging_limits_() {
   // check under power limit
   if (evse_state_is_charging(this->state_)) {
     uint64_t now = this->hal_->now_ms();
-    if (meter && this->under_power_limit_ > 0 && this->hal_->energy_meter_get_power() < this->under_power_limit_) {
+    uint32_t power = meter ? this->hal_->energy_meter_get_power() : POWER_UNKNOWN;
+
+    if (power != POWER_UNKNOWN && power > this->peak_power_) {
+      this->peak_power_ = power;
+    }
+
+    // The limit applies only after the power was above it in this session: a vehicle that
+    // has not started to draw power yet (or never draws that much) is not stopped.
+    bool applies = this->under_power_limit_ > 0 && this->peak_power_ > this->under_power_limit_;
+    if (applies && power != POWER_UNKNOWN && power < this->under_power_limit_) {
       if (!this->under_power_timing_) {
         this->under_power_timing_ = true;
         this->under_power_start_time_ = now;
@@ -233,6 +243,11 @@ void EvseCore::check_charging_limits_() {
     } else {
       this->reached_limit_ &= ~LIMIT_UNDER_POWER_BIT;
     }
+  } else {
+    // The time under the limit counts from the start of charging, so the vehicle has
+    // UNDER_POWER_TIME to ramp up again after a pause. A reached limit is kept, it stops
+    // charging until the end of the session.
+    this->under_power_timing_ = false;
   }
 }
 
@@ -433,6 +448,7 @@ void EvseCore::reset() {
   this->error_wait_to_ = 0;
   this->under_power_timing_ = false;
   this->under_power_start_time_ = 0;
+  this->peak_power_ = 0;
   this->c1_d1_ac_relay_wait_to_ = 0;
   this->pilot_state_ = PilotState::V12;
 }

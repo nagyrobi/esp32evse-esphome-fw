@@ -136,6 +136,21 @@ temperature threshold are persistent (the YAML values above are their factory de
 `maximum_charging_current` and `temperature_threshold` are input boxes (`mode: box`) by
 default, the others use the ESPHome default (`mode: auto`).
 
+**Limits.** While a limit of the session is reached, the `limit_reached` binary sensor is
+on and charging is stopped (C2 → C1). 0 turns a limit off, and a new session starts
+without reached limits.
+
+* `consumption_limit`: the session energy is above the limit.
+* `charging_time_limit`: the charging time of the session is above the limit.
+* `under_power_limit`: while charging, the power is below the limit for 60 s. It applies
+  only after the power was above the limit in the session, so a vehicle that has not
+  started to draw power yet (or never draws that much) is not stopped. The 60 s start
+  again each time charging starts, so the vehicle can ramp up after a pause. Unknown
+  power values are ignored.
+
+Raising the consumption or the charging time limit (or setting it to 0) allows charging
+again. A reached under power limit stays until the end of the session (vehicle unplugged).
+
 **Switches** (`platform: evse`): `enable` (allow charging) and `available` (off = state F,
 config entity category by default). Default `restore_mode: RESTORE_DEFAULT_ON`, use
 `ALWAYS_ON` to get the esp32-evse behaviour (always enabled after boot).
@@ -296,6 +311,10 @@ The state machine (`components/evse/evse_core.*`) is a line by line port of
 * Out of range charging currents are limited instead of rejected.
 * The authorization source is level and edge sensitive (see `authorization`).
 * Without an energy meter the consumption and under power limits are ignored.
+* The under power limit applies only after the power was above the limit in the session,
+  and its 60 s count from the start of charging. esp32-evse also stopped a vehicle that
+  never drew more than the limit, and it kept counting while the vehicle paused, so
+  charging could stop as soon as the vehicle resumed.
 * `enable` / `available` are restored after reboot by default.
 * The EVSE takes the current and voltage from sensors, any energy meter can be used.
 * The energy meter measures every second (esp32-evse: every 50 ms) and integrates the

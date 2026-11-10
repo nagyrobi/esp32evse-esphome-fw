@@ -823,7 +823,7 @@ uint32_t Evse::energy_meter_get_power() {
     return 0;  // no current flows with an open relay
   float power;
   if (!this->meter_power_(&power))
-    return UINT32_MAX;  // unknown, the under power limit is not reached
+    return POWER_UNKNOWN;  // the under power limit ignores it
   return static_cast<uint32_t>(std::max(lroundf(power), 0L));
 }
 
