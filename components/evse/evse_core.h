@@ -14,6 +14,10 @@
 //  * Lowering the maximum charging current also clamps the charging current.
 //  * Authorization may additionally be granted by a level ("source active").
 //  * Without an energy meter the consumption / under power limits are ignored.
+//  * The under power limit applies only after the power was above the limit in the
+//    session, and the time under the limit counts from the start of charging. The
+//    original also stopped a vehicle that never drew more than the limit, and kept
+//    counting while the vehicle paused, so charging could stop right after it resumed.
 //  * When all errors clear, the state machine restarts from state A. The original
 //    resumed the state from before the error (e.g. C2 -> relay on) when a non
 //    auto-clear error (temperature) cleared.
@@ -74,10 +78,13 @@ static constexpr uint8_t MAX_CHARGING_CURRENT_MAX = 63;     // A
 static constexpr uint16_t CHARGING_CURRENT_MIN = 60;        // A*10
 static constexpr uint32_t AUTHORIZED_TIME = 60000;          // ms, default validity of an authorization
 static constexpr uint32_t ERROR_WAIT_TIME = 60000;          // ms, auto clear of errors
-static constexpr uint32_t UNDER_POWER_TIME = 60000;         // ms
+static constexpr uint32_t UNDER_POWER_TIME = 60000;         // ms, time under the under power limit
 static constexpr uint32_t C1_D1_AC_RELAY_WAIT_TIME = 6000;  // ms
 static constexpr uint8_t TEMP_THRESHOLD_MIN = 40;           // °C
 static constexpr uint8_t TEMP_THRESHOLD_MAX = 80;           // °C
+
+/// Value of EvseHal::energy_meter_get_power() when the power is unknown
+static constexpr uint32_t POWER_UNKNOWN = UINT32_MAX;
 
 inline bool evse_state_is_session(EvseState state) { return state >= EvseState::B1 && state <= EvseState::D2; }
 inline bool evse_state_is_charging(EvseState state) { return state == EvseState::C2 || state == EvseState::D2; }
@@ -124,7 +131,7 @@ class EvseHal {
   virtual uint32_t energy_meter_get_consumption() { return 0; }
   /// Session charging time in s
   virtual uint32_t energy_meter_get_charging_time() { return 0; }
-  /// Actual power in W, UINT32_MAX when unknown (the under power limit is then not reached)
+  /// Actual power in W, POWER_UNKNOWN when unknown (the under power limit ignores it)
   virtual uint32_t energy_meter_get_power() { return 0; }
 };
 
@@ -184,7 +191,9 @@ class EvseCore {
   /// Charging time limit in s, 0 = disabled
   uint32_t get_charging_time_limit() const { return this->charging_time_limit_; }
   void set_charging_time_limit(uint32_t charging_time_limit) { this->charging_time_limit_ = charging_time_limit; }
-  /// Under power limit in W, 0 = disabled
+  /// Under power limit in W, 0 = disabled. Reached when the power is below the limit for
+  /// UNDER_POWER_TIME while charging, after it was above the limit in the session. The time
+  /// counts from the start of charging, and a reached limit stays until the session ends.
   uint32_t get_under_power_limit() const { return this->under_power_limit_; }
   void set_under_power_limit(uint32_t under_power_limit) { this->under_power_limit_ = under_power_limit; }
 
@@ -242,6 +251,7 @@ class EvseCore {
   uint64_t error_wait_to_{0};
   bool under_power_timing_{false};
   uint64_t under_power_start_time_{0};
+  uint32_t peak_power_{0};  // W, highest power of the session while charging
   uint64_t c1_d1_ac_relay_wait_to_{0};
   uint8_t max_charging_current_{32};
   PilotState pilot_state_{PilotState::V12};
