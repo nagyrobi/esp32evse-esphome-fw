@@ -40,6 +40,7 @@ SENSORS = {
         EvseSensorType.SENSOR_SESSION_ENERGY,
         sensor.sensor_schema(
             unit_of_measurement=UNIT_WATT_HOURS,
+            icon="mdi:counter",
             accuracy_decimals=0,
             device_class=DEVICE_CLASS_ENERGY,
             state_class=STATE_CLASS_TOTAL_INCREASING,

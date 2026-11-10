@@ -67,7 +67,7 @@ BINARY_SENSORS = {
         EvseBinarySensorType.BINARY_SENSOR_LIMIT_REACHED,
         cv.UNDEFINED,
         cv.UNDEFINED,
-        "mdi:car-speed-limiter",
+        "mdi:battery-check-outline",
     ),
     "pending_authorization": (
         EvseBinarySensorType.BINARY_SENSOR_PENDING_AUTHORIZATION,
