@@ -20,7 +20,7 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_CLEAR_ERROR): button.button_schema(
             ClearErrorButton,
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
-            icon="mdi:restart-alert",
+            icon="mdi:backup-restore",
         ),
     }
 )

@@ -39,7 +39,7 @@ class NumberSpec(NamedTuple):
 
 
 _CURRENT = (UNIT_AMPERE, DEVICE_CLASS_CURRENT, "mdi:current-ac")
-_ENERGY = (UNIT_WATT_HOURS, DEVICE_CLASS_ENERGY, "mdi:lightning-bolt")
+_ENERGY = (UNIT_WATT_HOURS, DEVICE_CLASS_ENERGY, "mdi:counter")
 _TIME = (UNIT_SECOND, DEVICE_CLASS_DURATION, "mdi:timer-outline")
 _POWER = (UNIT_WATT, DEVICE_CLASS_POWER, "mdi:flash-triangle-outline")
 
