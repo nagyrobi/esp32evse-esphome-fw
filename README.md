@@ -311,10 +311,6 @@ The state machine (`components/evse/evse_core.*`) is a line by line port of
 * Out of range charging currents are limited instead of rejected.
 * The authorization source is level and edge sensitive (see `authorization`).
 * Without an energy meter the consumption and under power limits are ignored.
-* The under power limit applies only after the power was above the limit in the session,
-  and its 60 s count from the start of charging. esp32-evse also stopped a vehicle that
-  never drew more than the limit, and it kept counting while the vehicle paused, so
-  charging could stop as soon as the vehicle resumed.
 * `enable` / `available` are restored after reboot by default.
 * The EVSE takes the current and voltage from sensors, any energy meter can be used.
 * The energy meter measures every second (esp32-evse: every 50 ms) and integrates the
@@ -388,26 +384,32 @@ disabled by default).
 
 **Continuing the esp32-evse counter:** `set_total_energy()` sets the total energy in Wh
 (persistent). To set it once when migrating, e.g. to the total consumption (Wh) shown by
-esp32-evse, a flag in flash makes sure the lambda runs only on the first boot (a factory
-reset erases both):
+esp32-evse, use a `number` component to enter the previous value manually and `button`
+to write it:
 
 ```yaml
-esphome:
-  on_boot:
-    priority: -100  # after the energy meter restored its value
-    then:
-      - lambda: |-
-          if (!id(total_energy_imported)) {
-            id(energy_meter).set_total_energy(1234567);  // Wh
-            id(total_energy_imported) = true;
-          }
+number:
+  - platform: template
+    name: Energy counter set
+    optimistic: true
+    entity_category: "diagnostic"
+    disabled_by_default: true
+    id: evse_write_wh
+    min_value: 0
+    max_value: 100000000
+    step: 1
+    mode: box
 
-globals:
-  - id: total_energy_imported
-    type: bool
-    restore_value: true
-    initial_value: "false"
+button:
+  - platform: template
+    name: Energy counter overwrite
+    entity_category: "diagnostic"
+    disabled_by_default: true
+    on_press:
+      - lambda: id(energy_meter).set_total_energy(id(evse_write_wh).state);  // Wh
 ```
+
+After writing, remove/comment out these from the config, so no accidental overwrite occurs in the future.
 
 ## Development
 
