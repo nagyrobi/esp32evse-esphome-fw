@@ -382,10 +382,8 @@ phase meter, other combinations are rejected.
 **Button** (`platform: evse_energy_meter`): `reset_total_energy` (config entity category,
 disabled by default).
 
-**Continuing the esp32-evse counter:** `set_total_energy()` sets the total energy in Wh
-(persistent). To set it once when migrating, e.g. to the total consumption (Wh) shown by
-esp32-evse, use a `number` component to enter the previous value manually and `button`
-to write it:
+**Continuing the esp32-evse counter:** Note the total energy you had previously in esp32-evse. From `set_total_energy()` sets the total energy in Wh (persistent). To set it once when migrating, 
+e.g. to the total consumption (Wh) shown by esp32-evse, use a `number` component to enter the previous value manually and `button` to write it:
 
 ```yaml
 number:
