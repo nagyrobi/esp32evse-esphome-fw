@@ -32,7 +32,12 @@ globals:
 script:
   - id: scenario
     then:
-      - delay: 3s
+      - delay: 1s
+      - logger.log: "SCENARIO: default consumption limit 5000Wh"
+      - number.set:
+          id: default_consumption_limit
+          value: 5000
+      - delay: 2s
       - logger.log: "SCENARIO: EV connects"
       - lambda: id(ev).set_ev_state('B');
       - delay: 2s
@@ -46,7 +51,12 @@ script:
       - number.set:
           id: charging_current
           value: 10
-      - delay: 4s
+      - delay: 1s
+      - logger.log: "SCENARIO: consumption limit 20000Wh for this session"
+      - number.set:
+          id: consumption_limit
+          value: 20000
+      - delay: 3s
       - logger.log: "SCENARIO: disable charging, the EV does not react"
       - switch.turn_off: charging_enabled
       - delay: 8s
@@ -237,3 +247,13 @@ number:
       name: Charging current
     maximum_charging_current:
       name: Maximum charging current
+    consumption_limit:
+      id: consumption_limit
+      name: Consumption limit
+      on_value:
+        - logger.log:
+            format: "Consumption limit: %.0fWh"
+            args: ["x"]
+    default_consumption_limit:
+      id: default_consumption_limit
+      name: Default consumption limit

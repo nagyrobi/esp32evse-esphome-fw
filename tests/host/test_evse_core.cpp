@@ -1203,6 +1203,143 @@ TEST(clear_error_without_error) {
   ASSERT_EVSE(EvseState::B2, PILOT_MOCK_STATE_PWM, false);
 }
 
+// Default limits: the limits return to them when a session ends
+
+static void set_default_limits() {
+  evse.set_default_consumption_limit(5000);
+  evse.set_default_charging_time_limit(3600);
+  evse.set_default_under_power_limit(500);
+}
+
+#define ASSERT_LIMITS(consumption, charging_time, under_power) \
+  do { \
+    TEST_ASSERT_EQUAL(consumption, evse.get_consumption_limit()); \
+    TEST_ASSERT_EQUAL(charging_time, evse.get_charging_time_limit()); \
+    TEST_ASSERT_EQUAL(under_power, evse.get_under_power_limit()); \
+  } while (0)
+
+// Setting a default limit also sets the limit
+TEST(default_limits_set_the_limits) {
+  ASSERT_LIMITS(0, 0, 0);
+  set_default_limits();
+  ASSERT_LIMITS(5000, 3600, 500);
+  TEST_ASSERT_EQUAL(5000, evse.get_default_consumption_limit());
+  TEST_ASSERT_EQUAL(3600, evse.get_default_charging_time_limit());
+  TEST_ASSERT_EQUAL(500, evse.get_default_under_power_limit());
+
+  // also during a session
+  ev_connect_sequence();
+  ev_charge_sequence();
+  evse.set_consumption_limit(20000);
+  evse.set_default_consumption_limit(6000);
+  ASSERT_LIMITS(6000, 3600, 500);
+
+  // a limit does not change its default
+  evse.set_consumption_limit(20000);
+  TEST_ASSERT_EQUAL(6000, evse.get_default_consumption_limit());
+}
+
+TEST(limits_return_to_defaults_after_session) {
+  set_default_limits();
+  ev_connect_sequence();
+  ev_charge_sequence();
+  ASSERT_LIMITS(5000, 3600, 500);
+
+  // changed for this session
+  evse.set_consumption_limit(20000);
+  evse.set_charging_time_limit(7200);
+  evse.set_under_power_limit(0);
+  evse.process();
+  ASSERT_EVSE(EvseState::C2, PILOT_MOCK_STATE_PWM, true);
+
+  // the EV pauses and resumes: the same session
+  hal.pilot_mock_up_voltage = PilotVoltage::V9;
+  evse.process();
+  ASSERT_EVSE(EvseState::B2, PILOT_MOCK_STATE_PWM, false);
+  hal.pilot_mock_up_voltage = PilotVoltage::V6;
+  evse.process();
+  ASSERT_EVSE(EvseState::C2, PILOT_MOCK_STATE_PWM, true);
+  ASSERT_LIMITS(20000, 7200, 0);
+
+  // the EV disconnects
+  hal.pilot_mock_up_voltage = PilotVoltage::V12;
+  evse.process();
+  ASSERT_EVSE(EvseState::A, PILOT_MOCK_STATE_HIGH, false);
+  ASSERT_LIMITS(5000, 3600, 500);
+
+  // the next session has the defaults: the consumption limit of 5000 Wh is reached
+  ev_connect_sequence();
+  ev_charge_sequence();
+  hal.energy_meter_mock_consumption = 5001;
+  evse.process();
+  ASSERT_EVSE(EvseState::C1, PILOT_MOCK_STATE_HIGH, true);
+  TEST_ASSERT_EQUAL(LIMIT_CONSUMPTION_BIT, evse.get_reached_limit());
+}
+
+// A limit set before the vehicle connects applies to that session
+TEST(limit_set_before_session) {
+  set_default_limits();
+  evse.set_consumption_limit(1000);
+
+  // "not available" and an error do not change it without a session
+  evse.set_available(false);
+  evse.process();
+  ASSERT_EVSE(EvseState::F, PILOT_MOCK_STATE_LOW, false);
+  evse.set_available(true);
+  evse.process();
+  ASSERT_EVSE(EvseState::A, PILOT_MOCK_STATE_HIGH, false);
+  hal.pilot_mock_up_voltage = PilotVoltage::V1;
+  evse.process();
+  ASSERT_EVSE(EvseState::E, PILOT_MOCK_STATE_LOW, false);
+  hal.pilot_mock_up_voltage = PilotVoltage::V12;
+  hal.step(61000);
+  evse.process();
+  ASSERT_EVSE(EvseState::A, PILOT_MOCK_STATE_HIGH, false);
+  ASSERT_LIMITS(1000, 3600, 500);
+
+  // it is reached in the session
+  ev_connect_sequence();
+  ev_charge_sequence();
+  ASSERT_LIMITS(1000, 3600, 500);
+  hal.energy_meter_mock_consumption = 1001;
+  evse.process();
+  ASSERT_EVSE(EvseState::C1, PILOT_MOCK_STATE_HIGH, true);
+
+  // back to the default after the session
+  hal.pilot_mock_up_voltage = PilotVoltage::V12;
+  evse.process();
+  ASSERT_EVSE(EvseState::A, PILOT_MOCK_STATE_HIGH, false);
+  ASSERT_LIMITS(5000, 3600, 500);
+}
+
+// An error and "not available" also end the session
+TEST(limits_return_to_defaults_after_error_or_not_available) {
+  set_default_limits();
+  ev_connect_sequence();
+  ev_charge_sequence();
+  evse.set_consumption_limit(20000);
+
+  // pilot fault while charging
+  hal.pilot_mock_up_voltage = PilotVoltage::V1;
+  evse.process();
+  ASSERT_EVSE(EvseState::E, PILOT_MOCK_STATE_LOW, false);
+  ASSERT_LIMITS(5000, 3600, 500);
+
+  // changed during the error: it applies to the next session
+  evse.set_consumption_limit(8000);
+  hal.step(61000);
+  evse.process();
+  ASSERT_EVSE(EvseState::A, PILOT_MOCK_STATE_HIGH, false);
+  ev_connect_sequence();
+  ASSERT_LIMITS(8000, 3600, 500);
+
+  // not available
+  evse.set_available(false);
+  evse.process();
+  ASSERT_EVSE(EvseState::F, PILOT_MOCK_STATE_LOW, false);
+  ASSERT_LIMITS(5000, 3600, 500);
+}
+
 TEST(state_strings) {
   TEST_ASSERT_TRUE(std::string("A") == evse_state_to_str(EvseState::A));
   TEST_ASSERT_TRUE(std::string("B1") == evse_state_to_str(EvseState::B1));

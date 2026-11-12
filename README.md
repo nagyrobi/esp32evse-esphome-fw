@@ -116,9 +116,10 @@ The duration of one measurement is logged at boot (`Pilot measurement: 250 sampl
 
 All entities are optional, add only what you need.
 
-**Numbers** (`platform: evse`). Like in esp32-evse, the runtime values start from
-their defaults after boot; the `default_*` values, the maximum charging current and the
-temperature threshold are persistent (the YAML values above are their factory defaults).
+**Numbers** (`platform: evse`). The `default_*` values, the maximum charging current and
+the temperature threshold are persistent (the YAML values above are their factory
+defaults). The charging current starts from its default after boot, like in esp32-evse.
+The limits are for one session and then return to their defaults, see Limits below.
 
 | Key | Unit | Range | Persistent |
 |---|---|---|---|
@@ -150,6 +151,11 @@ without reached limits.
 
 Raising the consumption or the charging time limit (or setting it to 0) allows charging
 again. A reached under power limit stays until the end of the session (vehicle unplugged).
+
+The limits apply to one session: the one in progress, or the next one when they are set
+before the vehicle connects. When the session ends (vehicle unplugged, error or not
+available) they return to their `default_*` values, so every session starts with the
+default limits. Setting a default also sets the limit right away.
 
 **Switches** (`platform: evse`): `enable` (allow charging) and `available` (off = state F,
 config entity category by default). Default `restore_mode: RESTORE_DEFAULT_ON`, use
@@ -311,6 +317,9 @@ The state machine (`components/evse/evse_core.*`) is a line by line port of
 * Out of range charging currents are limited instead of rejected.
 * The authorization source is level and edge sensitive (see `authorization`).
 * Without an energy meter the consumption and under power limits are ignored.
+* The limits return to their defaults when a session ends, and setting a default limit also
+  sets the limit. In esp32-evse the defaults are applied only at boot, and a changed limit
+  stays until the reboot.
 * `enable` / `available` are restored after reboot by default.
 * The EVSE takes the current and voltage from sensors, any energy meter can be used.
 * The energy meter measures every second (esp32-evse: every 50 ms) and integrates the

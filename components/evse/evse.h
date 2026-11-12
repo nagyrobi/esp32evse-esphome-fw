@@ -245,9 +245,9 @@ class Evse : public PollingComponent, public EvseHal {
   // defaults of the settings (used when not changed by the number entities)
   void set_max_charging_current(uint8_t current) { this->max_charging_current_ = current; }
   void set_default_charging_current(float current) { this->default_charging_current_ = current; }
-  void set_default_consumption_limit(uint32_t limit) { this->default_consumption_limit_ = limit; }
-  void set_default_charging_time_limit(uint32_t limit) { this->default_charging_time_limit_ = limit; }
-  void set_default_under_power_limit(uint32_t limit) { this->default_under_power_limit_ = limit; }
+  void set_default_consumption_limit(uint32_t limit) { this->core_.set_default_consumption_limit(limit); }
+  void set_default_charging_time_limit(uint32_t limit) { this->core_.set_default_charging_time_limit(limit); }
+  void set_default_under_power_limit(uint32_t limit) { this->core_.set_default_under_power_limit(limit); }
   void set_temperature_threshold(uint8_t threshold) { this->temperature_threshold_ = threshold; }
 
   // --- entities ---
@@ -313,6 +313,9 @@ class Evse : public PollingComponent, public EvseHal {
 #ifdef USE_NUMBER
   void publish_number_(EvseNumberType type, float value);
   void save_number_(EvseNumberType type, float value);
+  /// Publish the limit numbers that changed (they return to their defaults when a session
+  /// ends), and the given one in any case
+  void publish_limits_(EvseNumberType always = NUMBER_TYPE_COUNT);
 #endif
   float get_session_energy_() const;
   /// Apparent power (sum of V * I of the phases) from the meter sensors, false if unknown
@@ -380,9 +383,6 @@ class Evse : public PollingComponent, public EvseHal {
   // settings
   uint8_t max_charging_current_{32};
   float default_charging_current_{NAN};
-  uint32_t default_consumption_limit_{0};
-  uint32_t default_charging_time_limit_{0};
-  uint32_t default_under_power_limit_{0};
   uint8_t temperature_threshold_{60};
 
   // 64 bit millis
@@ -393,6 +393,8 @@ class Evse : public PollingComponent, public EvseHal {
 #ifdef USE_NUMBER
   EvseNumber *numbers_[NUMBER_TYPE_COUNT]{};
   ESPPreferenceObject number_prefs_[NUMBER_TYPE_COUNT];
+  // last published consumption, charging time and under power limit
+  uint32_t published_limits_[3]{UINT32_MAX, UINT32_MAX, UINT32_MAX};
 #endif
   EvseSwitch *switches_[SWITCH_TYPE_COUNT]{};
 #ifdef USE_BINARY_SENSOR

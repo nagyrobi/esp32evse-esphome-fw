@@ -43,9 +43,9 @@ _ENERGY = (UNIT_WATT_HOURS, DEVICE_CLASS_ENERGY, "mdi:counter")
 _TIME = (UNIT_SECOND, DEVICE_CLASS_DURATION, "mdi:timer-outline")
 _POWER = (UNIT_WATT, DEVICE_CLASS_POWER, "mdi:flash-triangle-outline")
 
-# Runtime values (charging_current and the limits) are reset to their defaults after boot,
-# the default_* values, the maximum charging current and the temperature threshold are
-# persistent (like the NVS settings of esp32-evse).
+# The charging current is reset to its default after boot, the limits also after each
+# session. The default_* values, the maximum charging current and the temperature
+# threshold are persistent (like the NVS settings of esp32-evse).
 NUMBERS = {
     "charging_current": NumberSpec(
         EvseNumberType.NUMBER_CHARGING_CURRENT, 6, 63, 0.1, *_CURRENT
