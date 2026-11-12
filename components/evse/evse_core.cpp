@@ -142,6 +142,12 @@ void EvseCore::enter_new_state_(EvseState state) {
       this->reached_limit_ = 0;
       this->under_power_timing_ = false;
       this->peak_power_ = 0;
+      if (evse_state_is_session(this->prev_state_)) {
+        // the session ended, the next one starts with the default limits
+        this->consumption_limit_ = this->default_consumption_limit_;
+        this->charging_time_limit_ = this->default_charging_time_limit_;
+        this->under_power_limit_ = this->default_under_power_limit_;
+      }
       this->rcm_selftest_done_ = false;
       if (this->rcm_selftest_pending_) {
         this->rcm_selftest_pending_ = false;
@@ -437,6 +443,9 @@ void EvseCore::reset() {
   this->consumption_limit_ = 0;
   this->charging_time_limit_ = 0;
   this->under_power_limit_ = 0;
+  this->default_consumption_limit_ = 0;
+  this->default_charging_time_limit_ = 0;
+  this->default_under_power_limit_ = 0;
   this->reached_limit_ = 0;
   this->rcm_selftest_done_ = false;
   this->rcm_selftest_pending_ = false;

@@ -261,16 +261,13 @@ void Evse::restore_settings_() {
             static_cast<float>(this->max_charging_current_));
   this->core_.set_charging_current(lroundf(this->default_charging_current_ * 10.0f));
 
-  // default limits, the limits after boot
+  // default limits, the limits after boot and after each session (setting them sets the limits)
   if (load(NUMBER_DEFAULT_CONSUMPTION_LIMIT, &value))
-    this->default_consumption_limit_ = std::max(lroundf(value), 0L);
-  this->core_.set_consumption_limit(this->default_consumption_limit_);
+    this->core_.set_default_consumption_limit(std::max(lroundf(value), 0L));
   if (load(NUMBER_DEFAULT_CHARGING_TIME_LIMIT, &value))
-    this->default_charging_time_limit_ = std::max(lroundf(value), 0L);
-  this->core_.set_charging_time_limit(this->default_charging_time_limit_);
+    this->core_.set_default_charging_time_limit(std::max(lroundf(value), 0L));
   if (load(NUMBER_DEFAULT_UNDER_POWER_LIMIT, &value))
-    this->default_under_power_limit_ = std::max(lroundf(value), 0L);
-  this->core_.set_under_power_limit(this->default_under_power_limit_);
+    this->core_.set_default_under_power_limit(std::max(lroundf(value), 0L));
 
   // temperature threshold
   if (load(NUMBER_TEMPERATURE_THRESHOLD, &value))
@@ -281,12 +278,10 @@ void Evse::restore_settings_() {
   this->publish_number_(NUMBER_CHARGING_CURRENT, this->get_charging_current());
   this->publish_number_(NUMBER_DEFAULT_CHARGING_CURRENT, this->default_charging_current_);
   this->publish_number_(NUMBER_MAXIMUM_CHARGING_CURRENT, this->max_charging_current_);
-  this->publish_number_(NUMBER_CONSUMPTION_LIMIT, this->core_.get_consumption_limit());
-  this->publish_number_(NUMBER_DEFAULT_CONSUMPTION_LIMIT, this->default_consumption_limit_);
-  this->publish_number_(NUMBER_CHARGING_TIME_LIMIT, this->core_.get_charging_time_limit());
-  this->publish_number_(NUMBER_DEFAULT_CHARGING_TIME_LIMIT, this->default_charging_time_limit_);
-  this->publish_number_(NUMBER_UNDER_POWER_LIMIT, this->core_.get_under_power_limit());
-  this->publish_number_(NUMBER_DEFAULT_UNDER_POWER_LIMIT, this->default_under_power_limit_);
+  this->publish_limits_();
+  this->publish_number_(NUMBER_DEFAULT_CONSUMPTION_LIMIT, this->core_.get_default_consumption_limit());
+  this->publish_number_(NUMBER_DEFAULT_CHARGING_TIME_LIMIT, this->core_.get_default_charging_time_limit());
+  this->publish_number_(NUMBER_DEFAULT_UNDER_POWER_LIMIT, this->core_.get_default_under_power_limit());
   this->publish_number_(NUMBER_TEMPERATURE_THRESHOLD, this->temperature_threshold_);
 #endif
 }
@@ -312,6 +307,9 @@ void Evse::update() {
 void Evse::process_() {
   this->core_.process();
   this->publish_state_();
+#ifdef USE_NUMBER
+  this->publish_limits_();
+#endif
   this->update_leds_();
 }
 
@@ -389,6 +387,19 @@ void Evse::save_number_(EvseNumberType type, float value) {
     this->number_prefs_[type].save(&value);
 }
 
+void Evse::publish_limits_(EvseNumberType always) {
+  static const EvseNumberType TYPES[] = {NUMBER_CONSUMPTION_LIMIT, NUMBER_CHARGING_TIME_LIMIT,
+                                         NUMBER_UNDER_POWER_LIMIT};
+  const uint32_t limits[] = {this->core_.get_consumption_limit(), this->core_.get_charging_time_limit(),
+                             this->core_.get_under_power_limit()};
+  for (size_t i = 0; i < 3; i++) {
+    if (TYPES[i] == always || limits[i] != this->published_limits_[i]) {
+      this->published_limits_[i] = limits[i];
+      this->publish_number_(TYPES[i], limits[i]);
+    }
+  }
+}
+
 void Evse::on_number_control(EvseNumberType type, float value) {
   if (std::isnan(value))
     return;
@@ -423,37 +434,42 @@ void Evse::on_number_control(EvseNumberType type, float value) {
       break;
     }
 
+    // The limits are for the session (the one in progress or the next one), they return to
+    // their defaults when it ends. Setting a default also sets the limit.
     case NUMBER_CONSUMPTION_LIMIT:
       this->core_.set_consumption_limit(std::max(lroundf(value), 0L));
-      this->publish_number_(type, this->core_.get_consumption_limit());
+      this->publish_limits_(type);
       break;
 
     case NUMBER_DEFAULT_CONSUMPTION_LIMIT:
-      this->default_consumption_limit_ = std::max(lroundf(value), 0L);
-      this->save_number_(type, this->default_consumption_limit_);
-      this->publish_number_(type, this->default_consumption_limit_);
+      this->core_.set_default_consumption_limit(std::max(lroundf(value), 0L));
+      this->save_number_(type, this->core_.get_default_consumption_limit());
+      this->publish_number_(type, this->core_.get_default_consumption_limit());
+      this->publish_limits_(NUMBER_CONSUMPTION_LIMIT);
       break;
 
     case NUMBER_CHARGING_TIME_LIMIT:
       this->core_.set_charging_time_limit(std::max(lroundf(value), 0L));
-      this->publish_number_(type, this->core_.get_charging_time_limit());
+      this->publish_limits_(type);
       break;
 
     case NUMBER_DEFAULT_CHARGING_TIME_LIMIT:
-      this->default_charging_time_limit_ = std::max(lroundf(value), 0L);
-      this->save_number_(type, this->default_charging_time_limit_);
-      this->publish_number_(type, this->default_charging_time_limit_);
+      this->core_.set_default_charging_time_limit(std::max(lroundf(value), 0L));
+      this->save_number_(type, this->core_.get_default_charging_time_limit());
+      this->publish_number_(type, this->core_.get_default_charging_time_limit());
+      this->publish_limits_(NUMBER_CHARGING_TIME_LIMIT);
       break;
 
     case NUMBER_UNDER_POWER_LIMIT:
       this->core_.set_under_power_limit(std::max(lroundf(value), 0L));
-      this->publish_number_(type, this->core_.get_under_power_limit());
+      this->publish_limits_(type);
       break;
 
     case NUMBER_DEFAULT_UNDER_POWER_LIMIT:
-      this->default_under_power_limit_ = std::max(lroundf(value), 0L);
-      this->save_number_(type, this->default_under_power_limit_);
-      this->publish_number_(type, this->default_under_power_limit_);
+      this->core_.set_default_under_power_limit(std::max(lroundf(value), 0L));
+      this->save_number_(type, this->core_.get_default_under_power_limit());
+      this->publish_number_(type, this->core_.get_default_under_power_limit());
+      this->publish_limits_(NUMBER_UNDER_POWER_LIMIT);
       break;
 
     case NUMBER_TEMPERATURE_THRESHOLD: {

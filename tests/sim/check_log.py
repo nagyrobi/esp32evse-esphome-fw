@@ -20,6 +20,8 @@ def main(path: str) -> int:
 
     # the expected events, in this order
     expected = [
+        "SCENARIO: default consumption limit 5000Wh",
+        "Consumption limit: 5000Wh",
         "SCENARIO: EV connects",
         "Enter B1 state",
         "Start session",
@@ -32,6 +34,8 @@ def main(path: str) -> int:
         "Set AC relay ON",
         "SCENARIO: charging current 10A",
         "Set pilot PWM 10.0A, duty 16.67%",
+        "SCENARIO: consumption limit 20000Wh for this session",
+        "Consumption limit: 20000Wh",
         "SCENARIO: disable charging",
         "Enter C1 state",
         "Set pilot level +12V",
@@ -46,6 +50,7 @@ def main(path: str) -> int:
         "SCENARIO: EV disconnects",
         "Enter A state",
         "Stop session",
+        "Consumption limit: 5000Wh",
         "SCENARIO: temperature high",
         "Enter E state",
         "Set pilot level -12V",
@@ -98,6 +103,21 @@ def main(path: str) -> int:
             "Enter " in line and " state" in line for line in lines[:first_connect]
         ),
         "stays in state A until the vehicle connects",
+    )
+
+    # the limit is set by its default, changed for the session and back to the default after
+    # the session; it does not change when the session starts or on errors without a session
+    first_scenario = next(
+        (i for i, line in enumerate(lines) if "SCENARIO: " in line), len(lines)
+    )
+    limits = [
+        m.group(1)
+        for line in lines[first_scenario:]
+        if (m := re.search(r"Consumption limit: (\d+)Wh", line))
+    ]
+    check(
+        limits == ["5000", "20000", "5000"],
+        f"consumption limit 5000, 20000, 5000Wh (got {', '.join(limits)})",
     )
 
     # relay switched only in C2 (and off by the force switch off / B2 / A)

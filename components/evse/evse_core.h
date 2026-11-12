@@ -18,6 +18,9 @@
 //    session, and the time under the limit counts from the start of charging. The
 //    original also stopped a vehicle that never drew more than the limit, and kept
 //    counting while the vehicle paused, so charging could stop right after it resumed.
+//  * The limits return to their defaults when a session ends, and setting a default limit
+//    also sets the limit. The original applied the defaults only at boot, and a changed
+//    limit stayed until the reboot.
 //  * When all errors clear, the state machine restarts from state A. The original
 //    resumed the state from before the error (e.g. C2 -> relay on) when a non
 //    auto-clear error (temperature) cleared.
@@ -185,6 +188,9 @@ class EvseCore {
   bool is_limit_reached() const { return this->reached_limit_ != 0; }
   uint8_t get_reached_limit() const { return this->reached_limit_; }
 
+  // The limits apply to the session in progress, or to the next one when they are set before
+  // it. When a session ends they return to their defaults.
+
   /// Consumption limit in Wh, 0 = disabled
   uint32_t get_consumption_limit() const { return this->consumption_limit_; }
   void set_consumption_limit(uint32_t consumption_limit) { this->consumption_limit_ = consumption_limit; }
@@ -196,6 +202,24 @@ class EvseCore {
   /// counts from the start of charging, and a reached limit stays until the session ends.
   uint32_t get_under_power_limit() const { return this->under_power_limit_; }
   void set_under_power_limit(uint32_t under_power_limit) { this->under_power_limit_ = under_power_limit; }
+
+  /// Default limits, the limits of every session unless they are changed for it. Setting a
+  /// default also sets the limit.
+  uint32_t get_default_consumption_limit() const { return this->default_consumption_limit_; }
+  void set_default_consumption_limit(uint32_t limit) {
+    this->default_consumption_limit_ = limit;
+    this->consumption_limit_ = limit;
+  }
+  uint32_t get_default_charging_time_limit() const { return this->default_charging_time_limit_; }
+  void set_default_charging_time_limit(uint32_t limit) {
+    this->default_charging_time_limit_ = limit;
+    this->charging_time_limit_ = limit;
+  }
+  uint32_t get_default_under_power_limit() const { return this->default_under_power_limit_; }
+  void set_default_under_power_limit(uint32_t limit) {
+    this->default_under_power_limit_ = limit;
+    this->under_power_limit_ = limit;
+  }
 
   /// Residual current monitoring
   bool is_rcm() const { return this->rcm_; }
@@ -236,6 +260,9 @@ class EvseCore {
   uint32_t consumption_limit_{0};
   uint32_t charging_time_limit_{0};
   uint32_t under_power_limit_{0};
+  uint32_t default_consumption_limit_{0};
+  uint32_t default_charging_time_limit_{0};
+  uint32_t default_under_power_limit_{0};
   uint8_t reached_limit_{0};
   bool rcm_{false};
   bool rcm_selftest_done_{false};
